@@ -1,0 +1,43 @@
+# CNPG Cluster `quill-pg`, single instance (Phase 1: no HA requirement).
+# The CNPG operator already runs cluster-wide (ns cnpg-system) — this
+# manifest only declares the Cluster CR.
+#
+# Image: reused verbatim from the proven navi-stg recovery Cluster
+# (m7-cluster-node/prod-migration/k3s-app-plane/recovery/navi-stg/database/
+# cluster.yaml) — the only CNPG postgres image+digest independently
+# confirmed against the linux/amd64 manifest for the active cluster-node node.
+# Quill has no pgvector requirement, but the `-standard-trixie` variant is a
+# strict superset of plain `postgresql:17` and using the already-verified
+# digest avoids introducing an unverified image pin.
+#
+# No `bootstrap.initdb.secret` override: CNPG auto-generates the app-user
+# Secret as `<cluster-name>-app` = `quill-pg-app` (CONTRACT.md), with keys
+# username/password/dbname/host/port/uri/jdbc-uri. Do not add a secret name
+# here — that would suppress the auto-generated `quill-pg-app` the rest of
+# the stack depends on.
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: quill-pg
+  namespace: quill
+  labels:
+    app.kubernetes.io/part-of: quill
+    app.kubernetes.io/component: postgres
+spec:
+  instances: 1
+  imageName: >-
+    ghcr.io/cloudnative-pg/postgresql:17-standard-trixie@sha256:d39555b9a7f91dd322bc60118e3ee9580f124b5aa90817e7ff36eeeb8236bd57
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      cpu: "2"
+      memory: 2Gi
+  bootstrap:
+    initdb:
+      database: quill
+      owner: quill
+  storage:
+    storageClass: local-path
+    size: 50Gi

@@ -1,0 +1,60 @@
+# Quill Phase 1 data + service plane, namespace `quill`, single-node k3s
+# (cluster-node), storage classes `local-path` and `nvme-tier0`. Rendered plainly
+# with kustomize (no Helm), forking the proven patterns already running on
+# this exact cluster (m7-sales/k8s/brain, azalea/platform/infra/cluster-node).
+#
+# Secret objects are deliberately absent. Six secrets are required and are
+# ALL materialized out-of-band by `make secrets` (scripts/bootstrap-secrets.sh
+# / scripts/materialize-secrets.sh) — never committed here:
+#
+#   quill-falkordb-auth   (Opaque, key: redis.conf, contents
+#                          `requirepass <password>`) — FalkorDB auth.
+#   quill-qdrant-auth     (Opaque, key: QDRANT_API_KEY) — Qdrant API key.
+#   quill-meili-auth      (Opaque, key: MEILI_MASTER_KEY) — Meilisearch
+#                          master key.
+#   quill-console-auth    (Opaque, keys: CF_ACCESS_TEAM_DOMAIN,
+#                          CF_ACCESS_AUD) — OPTIONAL; console runs without
+#                          Cloudflare Access enforcement until this secret
+#                          (and the matching Access app) exist.
+#   quill-cloudflared      (Opaque, key: TUNNEL_TOKEN) — cloudflared tunnel
+#                          run-token for the quill.example.com connector.
+#
+# quill-pg-app is NOT in this list: CNPG auto-generates it from the Cluster
+# CR's `bootstrap.initdb` stanza (postgres/cluster.yaml) — do not create it
+# out-of-band, do not add a `bootstrap.initdb.secret` override that would
+# suppress the auto-generated name.
+#
+# Apply order (see k8s/README.md for the full sequence and caveats):
+#   1. CNPG Cluster (postgres/cluster.yaml) and the embed model-prefetch Job
+#      (embed/deployment.yaml) both take a while to become ready — apply
+#      the namespace + these first so the wait isn't serialized behind
+#      everything else.
+#   2. Everything else.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - namespace.yaml
+  - oxigraph/statefulset.yaml
+  - qdrant/statefulset.yaml
+  - meili/deployment.yaml
+  - postgres/cluster.yaml
+  - embed/deployment.yaml
+  - pipeline/cronjob.yaml
+  - extract/deployment.yaml
+  - api/deployment.yaml
+  - console/deployment.yaml
+  - cloudflared/deployment.yaml
+  - networkpolicies.yaml
+
+# Image pins — updated by the release flow (scripts/build-push.sh prints the
+# tag+digest; keep tags in lockstep with what Zot actually holds).
+images:
+  - name: REGISTRY_HOST:5000/quill/pipeline
+    newTag: e556b6846f2b
+  - name: REGISTRY_HOST:5000/quill/api
+    newTag: 964a6b898f2c
+  - name: REGISTRY_HOST:5000/quill/console
+    newTag: a76d38870517
+  - name: REGISTRY_HOST:5000/quill/extract
+    newTag: 23768f26abf5

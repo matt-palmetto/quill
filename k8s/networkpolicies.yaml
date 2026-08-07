@@ -1,0 +1,551 @@
+# Default-deny + scoped ingress/egress for the quill namespace, mirroring
+# gtm-brain's fail-closed pattern (m7-sales/k8s/brain/networkpolicy.yaml).
+#
+# CNPG exception (read before editing): the CNPG instance manager running
+# inside every quill-pg pod talks directly to the Kubernetes API server
+# (status/condition updates, TLS secret rotation, leader-election
+# bookkeeping) for as long as the pod lives — not just at bootstrap. On k3s
+# the API server has no stable in-namespace podSelector/namespaceSelector
+# target (it runs embedded in the k3s server process on the host, not as a
+# normal pod), and this repo has no confirmed value for the cluster's
+# service-CIDR/API-server ClusterIP to use in an ipBlock rule. Guessing one
+# risks either a silent no-op (wrong CIDR) or, worse, looking like a
+# working restriction while leaving a real gap. Rather than guess, egress
+# is left unrestricted for quill-pg pods specifically (ingress to 5432 is
+# still locked down to pipeline+api below) — this is a deliberate, narrower
+# deviation from "default-deny both directions for the whole namespace",
+# flagged for the integrator to tighten once the cluster's API server
+# address is confirmed (`kubectl get svc kubernetes -n default`).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: quill-default-deny-ingress
+  namespace: quill
+  labels:
+    app.kubernetes.io/part-of: quill
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: quill-default-deny-egress
+  namespace: quill
+  labels:
+    app.kubernetes.io/part-of: quill
+spec:
+  podSelector:
+    matchExpressions:
+      - key: cnpg.io/cluster
+        operator: NotIn
+        values: ["quill-pg"]
+  policyTypes:
+    - Egress
+---
+# Every restricted pod may resolve DNS. quill-pg MUST stay unselected here:
+# being selected by ANY Egress-type policy makes a pod deny-by-default, so a
+# podSelector:{} version of this policy silently re-restricted quill-pg to
+# DNS-only and broke CNPG's API-server access (initdb crash-looped on
+# 10.43.0.1:443, found 2026-08-06 first deploy).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: quill-dns-egress
+  namespace: quill
+  labels:
+    app.kubernetes.io/part-of: quill
+spec:
+  podSelector:
+    matchExpressions:
+      - key: cnpg.io/cluster
+        operator: NotIn
+        values: ["quill-pg"]
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+---
+# Postgres (CNPG-managed): ingress on 5432 from pipeline + api only.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: quill-pg-ingress
+  namespace: quill
+  labels:
+    app.kubernetes.io/part-of: quill
+    app.kubernetes.io/component: postgres
+spec:
+  podSelector:
+    matchLabels:
+      cnpg.io/cluster: quill-pg
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: quill-ingest
+        - podSelector:
+            matchLabels:
+              app: quill-api
+      ports:
+        - port: 5432
+          protocol: TCP
+---
+# Qdrant: ingress on 6333 (http, used by both clients) from pipeline + api.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: quill-qdrant-ingress
+  namespace: quill
+  labels:
+    app: quill-qdrant
+    app.kubernetes.io/part-of: quill
+    app.kubernetes.io/component: vector
+spec:
+  podSelector:
+    matchLabels:
+      app: quill-qdrant
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: quill-ingest
+        - podSelector:
+            matchLabels:
+              app: quill-api
+      ports:
+        - port: 6333
+          protocol: TCP
+---
+# Meilisearch: ingress on 7700 from pipeline + api.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: quill-meili-ingress
+  namespace: quill
+  labels:
+    app: quill-meili
+    app.kubernetes.io/part-of: quill
+    app.kubernetes.io/component: search
+spec:
+  podSelector:
+    matchLabels:
+      app: quill-meili
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: quill-ingest
+        - podSelector:
+            matchLabels:
+              app: quill-api
+      ports:
+        - port: 7700
+          protocol: TCP
+---
+# Embed (Infinity): ingress on 7997 from pipeline + api.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: quill-embed-ingress
+  namespace: quill
+  labels:
+    app: quill-embed
+    app.kubernetes.io/part-of: quill
+    app.kubernetes.io/component: embeddings
+spec:
+  podSelector:
+    matchLabels:
+      app: quill-embed
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: quill-ingest
+        - podSelector:
+            matchLabels:
+              app: quill-api
+      ports:
+        - port: 7997
+          protocol: TCP
+---
+# Extract (docling worker): ingress on 9000 from pipeline only.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: quill-extract-ingress
+  namespace: quill
+  labels:
+    app: quill-extract
+    app.kubernetes.io/part-of: quill
+    app.kubernetes.io/component: extract
+spec:
+  podSelector:
+    matchLabels:
+      app: quill-extract
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: quill-ingest
+      ports:
+        - port: 9000
+          protocol: TCP
+---
+# Pipeline (quill-ingest CronJob pods): egress to every store it writes to,
+# plus the four NFS corpus mounts.
+#
+# NFS egress note: gtm-brain's qdrant-backup-networkpolicy.yaml documents
+# that in-tree `nfs:` volumes are mounted by the kubelet in the *node*
+# network namespace, not the pod's — so this rule may not be strictly
+# necessary for the NFS reads themselves. Kept anyway for explicitness and
+# in case this cluster's CNI enforces NetworkPolicy at a point where it
+# does matter; it is a pure allow-list addition, so it cannot break
+# anything if it turns out to be a no-op.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: quill-ingest-egress
+  namespace: quill
+  labels:
+    app: quill-ingest
+    app.kubernetes.io/part-of: quill
+    app.kubernetes.io/component: pipeline
+spec:
+  podSelector:
+    matchLabels:
+      app: quill-ingest
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              cnpg.io/cluster: quill-pg
+      ports:
+        - port: 5432
+          protocol: TCP
+    - to:
+        - podSelector:
+            matchLabels:
+              app: quill-qdrant
+      ports:
+        - port: 6333
+          protocol: TCP
+    - to:
+        - podSelector:
+            matchLabels:
+              app: quill-meili
+      ports:
+        - port: 7700
+          protocol: TCP
+    - to:
+        - podSelector:
+            matchLabels:
+              app: quill-embed
+      ports:
+        - port: 7997
+          protocol: TCP
+    - to:
+        - podSelector:
+            matchLabels:
+              app: quill-extract
+      ports:
+        - port: 9000
+          protocol: TCP
+    - to:
+        - podSelector:
+            matchLabels:
+              app: quill-oxigraph
+      ports:
+        - port: 7878
+          protocol: TCP
+    - to:
+        - ipBlock:
+            cidr: NAS_IP/32
+      ports:
+        - port: 2049
+          protocol: TCP
+        - port: 2049
+          protocol: UDP
+        - port: 111
+          protocol: TCP
+        - port: 111
+          protocol: UDP
+    # Voyage AI (api.voyageai.com) — canonical embedding backend since
+    # DECISIONS 2026-08-07. Public HTTPS only, every private range denied,
+    # so this rule cannot reach anything inside the estate. Matt's studio
+    # (workstation) is deliberately NOT reachable from here: one model per box.
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 10.0.0.0/8
+              - 172.16.0.0/12
+              - 192.168.0.0/16
+              - TAILNET_IP/10
+      ports:
+        - port: 443
+          protocol: TCP
+---
+# quill-api: egress to meili/qdrant/embed/pg; ingress from console +
+# cloudflared (CONTRACT.md search/ops are reachable from both the console
+# BFF path and, if ever routed directly, the tunnel).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: quill-api
+  namespace: quill
+  labels:
+    app: quill-api
+    app.kubernetes.io/part-of: quill
+    app.kubernetes.io/component: api
+spec:
+  podSelector:
+    matchLabels:
+      app: quill-api
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: quill-console
+        - podSelector:
+            matchLabels:
+              app: quill-cloudflared
+      ports:
+        - port: 8080
+          protocol: TCP
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              app: quill-meili
+      ports:
+        - port: 7700
+          protocol: TCP
+    - to:
+        - podSelector:
+            matchLabels:
+              app: quill-qdrant
+      ports:
+        - port: 6333
+          protocol: TCP
+    - to:
+        - podSelector:
+            matchLabels:
+              app: quill-embed
+      ports:
+        - port: 7997
+          protocol: TCP
+    - to:
+        - podSelector:
+            matchLabels:
+              cnpg.io/cluster: quill-pg
+      ports:
+        - port: 5432
+          protocol: TCP
+    - to:
+        - podSelector:
+            matchLabels:
+              app: quill-oxigraph
+      ports:
+        - port: 7878
+          protocol: TCP
+    # Voyage AI — query-time embeds must share the index-time space; the
+    # api degrades to keyword-only when Voyage is unreachable (search.ts).
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 10.0.0.0/8
+              - 172.16.0.0/12
+              - 192.168.0.0/16
+              - TAILNET_IP/10
+      ports:
+        - port: 443
+          protocol: TCP
+---
+# quill-console: egress to api; ingress from cloudflared only.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: quill-console
+  namespace: quill
+  labels:
+    app: quill-console
+    app.kubernetes.io/part-of: quill
+    app.kubernetes.io/component: console
+spec:
+  podSelector:
+    matchLabels:
+      app: quill-console
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: quill-cloudflared
+      ports:
+        - port: 8080
+          protocol: TCP
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              app: quill-api
+      ports:
+        - port: 8080
+          protocol: TCP
+    # CF Access JWT verification fetches the team's JWKS from
+    # <team>.cloudflareaccess.com — without 443 egress the middleware
+    # rejects every assertion (hit on first login, 2026-08-06).
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 10.0.0.0/8
+              - 172.16.0.0/12
+              - 192.168.0.0/16
+      ports:
+        - port: 443
+          protocol: TCP
+---
+# cloudflared: egress to console + api, plus 443 to the Cloudflare edge.
+# Unlike the HF-download exception below, no private-range exclusion is
+# applied — cloudflared's entire job is dialing out to arbitrary Cloudflare
+# edge IPs worldwide, and it never proxies caller-controlled destinations,
+# so there is no SSRF surface an exclusion would protect against.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: quill-cloudflared-egress
+  namespace: quill
+  labels:
+    app: quill-cloudflared
+    app.kubernetes.io/part-of: quill
+    app.kubernetes.io/component: cloudflared
+spec:
+  podSelector:
+    matchLabels:
+      app: quill-cloudflared
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              app: quill-console
+      ports:
+        - port: 8080
+          protocol: TCP
+    - to:
+        - podSelector:
+            matchLabels:
+              app: quill-api
+      ports:
+        - port: 8080
+          protocol: TCP
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+      ports:
+        - port: 443
+          protocol: TCP
+        # cloudflared's tunnel transport is QUIC on 7844/udp with a
+        # 7844/tcp (http2) fallback — 443 alone leaves the connector
+        # flapping on "Retrying connection" until the liveness probe
+        # kills it (observed on first deploy, 2026-08-06).
+        - port: 7844
+          protocol: UDP
+        - port: 7844
+          protocol: TCP
+---
+# embed model-prefetch Job: one-shot public HTTPS egress to Hugging Face,
+# same reviewed private-range exclusion as
+# m7-sales/k8s/brain/bge-m3-networkpolicy.yaml (gtm-brain-bge-m3-model-fetch)
+# — this policy never selects the long-lived quill-embed Deployment.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: quill-embed-model-prefetch-egress
+  namespace: quill
+  labels:
+    app: quill-embed-model-prefetch
+    app.kubernetes.io/part-of: quill
+    app.kubernetes.io/component: embeddings-model-fetch
+spec:
+  podSelector:
+    matchLabels:
+      app: quill-embed-model-prefetch
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 10.0.0.0/8
+              - TAILNET_IP/10
+              - 127.0.0.0/8
+              - 169.254.0.0/16
+              - 172.16.0.0/12
+              - 192.168.0.0/16
+      ports:
+        - port: 443
+          protocol: TCP
+---
+# Oxigraph has no built-in auth, so reachability IS the access control:
+# ingress only from the api and the pipeline, and never from the tunnel.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: quill-oxigraph-ingress
+  namespace: quill
+  labels:
+    app: quill-oxigraph
+    app.kubernetes.io/part-of: quill
+    app.kubernetes.io/component: knowledge-graph
+spec:
+  podSelector:
+    matchLabels:
+      app: quill-oxigraph
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: quill-ingest
+        - podSelector:
+            matchLabels:
+              app: quill-api
+      ports:
+        - port: 7878
+          protocol: TCP

@@ -1,0 +1,142 @@
+@prefix quill: <https://quill.example.com/ontology#> .
+@prefix qid:   <https://quill.example.com/id/> .
+@prefix prov:  <http://www.w3.org/ns/prov#> .
+@prefix schema: <https://schema.org/> .
+@prefix foaf:  <http://xmlns.com/foaf/0.1/> .
+@prefix xsd:   <http://www.w3.org/2001/XMLSchema#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+
+# --- static config ---
+GRAPH qid:g-config {
+    qid:root-cloud-drives a quill:CorpusRoot ; rdfs:label "cloud-drives" ;
+        quill:mountPath "/corpus/cloud-drives" ; quill:embedPolicy "documents" .
+    qid:sys-files  a quill:IngestSubsystem ; rdfs:label "files" .
+    qid:sys-immich a quill:IngestSubsystem ; rdfs:label "immich" .
+    qid:origin-example-org a quill:Origin ; rdfs:label "example-org" .
+    qid:origin-matt a quill:Origin ; rdfs:label "matt" ; quill:resolvesTo qid:person-example-user .
+    qid:agent-quill-pipeline a prov:SoftwareAgent ; prov:actedOnBehalfOf qid:person-example-user .
+    qid:person-example-user a prov:Person ; foaf:name "Example User" .
+}
+
+# --- index run: File, Document/Invoice, Chunk (deterministic, in-place graph) ---
+GRAPH qid:g-state-files-cloud-drives {
+    qid:run-20260805030000-index a quill:PipelineRun ; quill:runId "20260805030000-index" ; quill:stage "index" ;
+        prov:startedAtTime "2026-08-05T03:00:00Z"^^xsd:dateTime ; prov:endedAtTime "2026-08-05T03:41:12Z"^^xsd:dateTime ;
+        prov:wasAssociatedWith qid:agent-quill-pipeline .
+
+    # Full type chain materialized explicitly — Oxigraph does no subsumption (§2/§7).
+    qid:file-38fa11 a quill:File, quill:Document, quill:FinancialLegalDocument, quill:Invoice, schema:Invoice ;
+        quill:path "/corpus/cloud-drives/example-org/Invoices/2026/acme-invoice-4471.pdf" ;
+        quill:filename "acme-invoice-4471.pdf" ; quill:extension "pdf" ; quill:sizeBytes 184320 ;
+        quill:mtime "2026-08-05T02:58:00Z"^^xsd:dateTime ; quill:contentHash "sha256:7a1ec4f2..." ;
+        quill:root qid:root-cloud-drives ; quill:origin qid:origin-example-org ; quill:subsystem qid:sys-files ;
+        quill:pageCount 2 ; quill:extractionEngine "anydoc" ; quill:extractionTruncated false ;
+        quill:totalAmountDue 4250.00 ; schema:paymentDueDate "2026-08-21"^^xsd:date ;
+        schema:provider qid:org-acme-corp ; schema:customer qid:org-palmetto-interactive ;
+        prov:wasGeneratedBy qid:run-20260805030000-index .
+
+    qid:chunk-9f3a2c a quill:Chunk ;
+        quill:chunkIndex 0 ; quill:text "Invoice #4471 — August Services. Amount due $4,250.00, due 2026-08-21..." ;
+        quill:tokenCount 187 ; quill:qdrantPointId "b3f1a2c4-0000-5000-8000-000000000001" ;
+        quill:qdrantCollection "quill_chunks" ; quill:embeddingModel "voyage-4-large" ;
+        quill:origin qid:origin-example-org ;
+        prov:wasDerivedFrom qid:file-38fa11 ; prov:wasGeneratedBy qid:run-20260805030000-index .
+}
+
+# --- identity + graphify run: Person, Organization, Communication (deterministic, in-place graph) ---
+GRAPH qid:g-state-identity {
+    qid:run-20260805031000-graphify a quill:PipelineRun ; quill:runId "20260805031000-graphify" ; quill:stage "graphify" ;
+        prov:startedAtTime "2026-08-05T03:10:00Z"^^xsd:dateTime ; prov:wasAssociatedWith qid:agent-quill-pipeline .
+
+    qid:person-jordan-reyes a quill:Person, foaf:Person ; foaf:name "Jordan Reyes" ;
+        quill:hasIdentity qid:identity-jordan-reyes-email ; prov:wasGeneratedBy qid:run-20260805031000-graphify .
+    qid:identity-jordan-reyes-email a quill:Identity ;
+        quill:identityType "email" ; quill:identityValue "jordan.reyes@acmecorp.com" ;
+        quill:identityOf qid:person-jordan-reyes ; quill:identityConfidence "1.0"^^xsd:decimal ;
+        prov:wasGeneratedBy qid:run-20260805031000-graphify .
+
+    qid:org-acme-corp a quill:Organization, foaf:Organization ; foaf:name "Acme Corp" ;
+        prov:wasGeneratedBy qid:run-20260805031000-graphify .
+    qid:org-palmetto-interactive a quill:Organization, foaf:Organization ; foaf:name "Example Org LLC" ;
+        prov:wasGeneratedBy qid:run-20260805031000-graphify .
+}
+GRAPH qid:g-state-communications {
+    qid:comm-a91f a quill:Communication, schema:Message ;
+        schema:sender qid:person-jordan-reyes ; schema:recipient qid:person-example-user ;
+        schema:dateSent "2026-08-05T02:55:00Z"^^xsd:dateTime ;
+        quill:subjectLine "Invoice #4471 - August Services" ; quill:threadId "thread-4471" ;
+        schema:messageAttachment qid:file-38fa11 ;
+        quill:origin qid:origin-example-org ; quill:subsystem qid:sys-files ;
+        prov:wasGeneratedBy qid:run-20260805031000-graphify .
+}
+
+# --- enrichment run: Claims (append-only) + materialized layer update ---
+GRAPH qid:run-20260805031244-enrich {
+    qid:run-20260805031244-enrich a quill:PipelineRun ; quill:runId "20260805031244-enrich" ; quill:stage "enrich" ;
+        prov:startedAtTime "2026-08-05T03:12:44Z"^^xsd:dateTime ; prov:wasAssociatedWith qid:agent-quill-pipeline .
+
+    # High confidence — auto-accepted and materialized (mirrors D1's ≥0.9 threshold).
+    qid:claim-a1b2c3 a quill:Claim ;
+        quill:claimSubject qid:org-palmetto-interactive ; quill:claimPredicate quill:paidTo ;
+        quill:claimObject qid:org-acme-corp ; quill:confidence "0.95"^^xsd:decimal ;
+        quill:validFrom "2026-08-05"^^xsd:date ; quill:materialized true ;
+        prov:wasDerivedFrom qid:chunk-9f3a2c ; prov:wasGeneratedBy qid:run-20260805031244-enrich ;
+        prov:generatedAtTime "2026-08-05T03:12:47Z"^^xsd:dateTime .
+
+    # Below threshold — audited, NOT materialized; console review queue candidate.
+    qid:claim-7d4e91 a quill:Claim ;
+        quill:claimSubject qid:person-jordan-reyes ; quill:claimPredicate schema:worksFor ;
+        quill:claimObject qid:org-acme-corp ; quill:confidence "0.88"^^xsd:decimal ;
+        quill:materialized false ;
+        prov:wasDerivedFrom qid:chunk-9f3a2c ; prov:wasGeneratedBy qid:run-20260805031244-enrich ;
+        prov:generatedAtTime "2026-08-05T03:12:51Z"^^xsd:dateTime .
+}
+GRAPH qid:g-state-materialized {
+    # Rebuildable projection — only claim-a1b2c3 cleared the 0.9 bar.
+    qid:org-palmetto-interactive quill:paidTo qid:org-acme-corp .
+}
+
+# --- immich-sync run: Photo, Face, Place, Album (deterministic pull, in-place graph) ---
+GRAPH qid:g-state-immich {
+    qid:run-20260805040000-immich-sync a quill:PipelineRun ; quill:runId "20260805040000-immich-sync" ;
+        quill:stage "immich-sync" ; prov:startedAtTime "2026-08-05T04:00:00Z"^^xsd:dateTime ;
+        prov:wasAssociatedWith qid:agent-quill-pipeline .
+
+    qid:photo-d4e5f6 a quill:Photo ;
+        quill:immichAssetId "d4e5f6-uuid" ; quill:checksum "sha1base64..." ;
+        quill:originalFileName "IMG_20260603_142201.jpg" ; quill:takenAt "2026-06-03T14:22:01Z"^^xsd:dateTime ;
+        quill:latitude 32.7765 ; quill:longitude -79.9311 ; quill:place qid:place-charleston-sc ;
+        quill:memberOfAlbum qid:album-offsite-2026 ; quill:origin qid:origin-matt ; quill:subsystem qid:sys-immich ;
+        quill:appearsIn qid:person-example-user ;
+        quill:duringEvent qid:event-offsite-charleston ;
+        prov:wasGeneratedBy qid:run-20260805040000-immich-sync .
+
+    qid:face-f1a2 a quill:Face ;
+        quill:detectedIn qid:photo-d4e5f6 ; quill:depictsPerson qid:person-example-user ;
+        quill:faceSourceType "clustered" ;
+        quill:boundingBoxX1 210.0 ; quill:boundingBoxY1 88.0 ; quill:boundingBoxX2 340.0 ; quill:boundingBoxY2 240.0 ;
+        prov:wasGeneratedBy qid:run-20260805040000-immich-sync .
+
+    qid:ocr-b7c8 a quill:OcrRegion ;
+        quill:detectedIn qid:photo-d4e5f6 ; quill:ocrText "Q3 Roadmap" ;
+        quill:textScore 0.97 ; quill:boxScore 0.89 ;
+        quill:x1 0.12 ; quill:y1 0.05 ; quill:x2 0.88 ; quill:y2 0.05 ; quill:x3 0.88 ; quill:y3 0.11 ; quill:x4 0.12 ; quill:y4 0.11 ;
+        prov:wasGeneratedBy qid:run-20260805040000-immich-sync .
+
+    
+    qid:project-offsite-2026 a quill:Project, prov:Entity ;
+        schema:name "Palmetto Team Offsite 2026" ;
+        quill:projectStartDate "2026-06-01"^^xsd:date ;
+        quill:projectEndDate "2026-06-30"^^xsd:date ;
+        quill:projectParticipant qid:person-example-user ;
+        prov:wasGeneratedBy qid:run-20260805031000-graphify .
+
+    qid:event-offsite-charleston a quill:Event, prov:Entity ;
+        schema:name "Charleston offsite week" ;
+        schema:location qid:place-charleston-sc ;
+        quill:relatesToProject qid:project-offsite-2026 ;
+        prov:wasGeneratedBy qid:run-20260805031000-graphify .
+
+    qid:place-charleston-sc a quill:Place ; quill:placeCity "Charleston" ; quill:placeRegion "SC" ; quill:placeCountry "US" .
+    qid:album-offsite-2026 a quill:Album ; schema:name "Palmetto Team Offsite 2026" ; quill:assetCount 142 .
+}

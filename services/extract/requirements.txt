@@ -1,0 +1,5 @@
+# Firecrawl anydoc (MIT): pure-Rust, no ML models, ~5ms/doc. Primary engine.
+firecrawl-anydoc==0.1.6
+docling==2.118.0
+fastapi==0.141.1
+uvicorn==0.52.1

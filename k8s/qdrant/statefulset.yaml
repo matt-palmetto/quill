@@ -1,0 +1,123 @@
+# Qdrant, standalone, single tenant. Collection `quill_chunks` (1024-d
+# cosine, CONTRACT.md) is created idempotently by the pipeline on first
+# successful ingest run. Forked from the proven pattern on this exact
+# cluster: m7-sales/k8s/brain/qdrant-statefulset.yaml.
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: quill-qdrant
+  namespace: quill
+  labels:
+    app: quill-qdrant
+    app.kubernetes.io/part-of: quill
+    app.kubernetes.io/component: vector
+spec:
+  serviceName: quill-qdrant
+  replicas: 1
+  selector:
+    matchLabels:
+      app: quill-qdrant
+  template:
+    metadata:
+      labels:
+        app: quill-qdrant
+        app.kubernetes.io/part-of: quill
+        app.kubernetes.io/component: vector
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: qdrant
+          # Pinned to the digest already proven on this cluster. Never :latest.
+          image: qdrant/qdrant:v1.18.2-unprivileged@sha256:b79aaa49ce7a7e5b7e9cf3fe76be400c911457084b4b7af47487c1c9ae5962e5
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          ports:
+            - name: http
+              containerPort: 6333
+              protocol: TCP
+            - name: grpc
+              containerPort: 6334
+              protocol: TCP
+          env:
+            - name: QDRANT__SERVICE__API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: quill-qdrant-auth
+                  key: QDRANT_API_KEY
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /livez
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 20
+            timeoutSeconds: 5
+          resources:
+            requests:
+              cpu: 500m
+              memory: 1Gi
+            limits:
+              cpu: "4"
+              memory: 8Gi
+          volumeMounts:
+            - name: qdrant-data
+              mountPath: /qdrant/storage
+            - name: qdrant-data
+              mountPath: /qdrant/snapshots
+              subPath: snapshots
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: 256Mi
+  volumeClaimTemplates:
+    - metadata:
+        name: qdrant-data
+      spec:
+        accessModes:
+          - ReadWriteOnce
+        storageClassName: nvme-tier0
+        resources:
+          requests:
+            storage: 100Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: quill-qdrant
+  namespace: quill
+  labels:
+    app: quill-qdrant
+    app.kubernetes.io/part-of: quill
+    app.kubernetes.io/component: vector
+spec:
+  type: ClusterIP
+  selector:
+    app: quill-qdrant
+  ports:
+    - name: http
+      port: 6333
+      targetPort: http
+      protocol: TCP
+    - name: grpc
+      port: 6334
+      targetPort: grpc
+      protocol: TCP

@@ -1,0 +1,110 @@
+{
+  "roots": [
+    {
+      "name": "cloud-drives",
+      "path": "/corpus/cloud-drives",
+      "origin": "path-segment",
+      "enabled": true,
+      "exclude": [
+        "node_modules",
+        ".git",
+        ".venv",
+        "__pycache__"
+      ],
+      "embed": "documents",
+      "note": "Includes sarah/ as of 2026-08-07 (Matt lifted the earlier exclusion explicitly). Origin is the first path segment, so her files stay filterable as origin='sarah'."
+    },
+    {
+      "name": "archives",
+      "path": "/corpus/archives",
+      "origin": "archives",
+      "enabled": true,
+      "exclude": [
+        "node_modules",
+        ".git",
+        "@eaDir",
+        "#recycle",
+        ".venv",
+        "__pycache__"
+      ],
+      "embed": "documents"
+    },
+    {
+      "name": "inbox",
+      "path": "/corpus/inbox",
+      "origin": "inbox",
+      "enabled": true,
+      "embed": "documents",
+      "exclude": [
+        "node_modules",
+        ".git",
+        ".venv",
+        "__pycache__"
+      ],
+      "note": "storage-pool/backups/inbox \u2014 a Google Drive export (My Drive/Downloads) holding documents that exist nowhere else in the corpus."
+    },
+    {
+      "name": "mac-sync",
+      "path": "/corpus/mac-sync",
+      "origin": "path-segment",
+      "enabled": true,
+      "exclude": [
+        "node_modules",
+        ".git",
+        ".venv",
+        "venv",
+        "__pycache__",
+        ".next",
+        "dist",
+        "build",
+        "out",
+        "target",
+        ".cache",
+        "Caches",
+        "Library",
+        "DerivedData",
+        ".npm",
+        ".cargo",
+        ".rustup",
+        ".gradle",
+        ".m2",
+        ".gem",
+        "site-packages",
+        "vendor",
+        "Pods",
+        ".ruff_cache",
+        ".pytest_cache",
+        ".mypy_cache",
+        ".tox",
+        "coverage",
+        ".Trash",
+        ".terraform",
+        ".pnpm-store",
+        ".claude",
+        ".docker",
+        ".local",
+        "go/pkg"
+      ],
+      "note": "Dev-tree backup: source is knowledge but is already in git, so it is keyword-only (embed:none). Vendored deps, build output, and tool caches are excluded entirely. Worktrees are excluded globally in sources.mjs.",
+      "embed": "none"
+    },
+    {
+      "name": "git-mirrors",
+      "path": "/corpus/git-mirrors",
+      "origin": "git-mirrors",
+      "enabled": false,
+      "exclude": [
+        ".git",
+        "*.git",
+        "objects",
+        "refs",
+        "hooks",
+        "info",
+        "branches",
+        "logs"
+      ],
+      "note": "Disabled for Phase 1 (CONTRACT.md deviation, see pipeline report): bare mirrors under this root are git object stores, not working files -- indexing them as flat text would surface raw pack/object garbage with no commit/PR context. Phase 2's git connector (services/pipeline connector or a dedicated worker) reads these properly via `git log`/REST instead. The exclude patterns above are kept so that if this root is ever flipped to enabled:true before Phase 2 lands, .git directories and bare-repo internals (objects/refs/hooks/info/branches/logs, *.git dirs) are still never opened.",
+      "embed": "none"
+    }
+  ]
+}

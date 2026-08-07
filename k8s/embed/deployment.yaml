@@ -1,0 +1,360 @@
+# Infinity CPU serving BOTH bge-m3 (embed, 1024-d) and bge-reranker-v2-m3
+# (rerank), OpenAI-style under /v1 (CONTRACT.md `quill-embed`). Forked from
+# m7-sales/k8s/brain/bge-m3.yaml's model-cache PVC + revision-named
+# prefetch Job + verify-immutable-model initContainer pattern — same
+# immutable-model discipline, extended to two models sharing one Infinity
+# process (Infinity v2's repeated --model-id/--served-model-name flags).
+#
+# Image digest: docker.io/michaelf34/infinity@sha256:94db836145f6... is the
+# digest gtm-brain's bge-m3.yaml actually pins (verified by reading that
+# file 2026-08-06) — NOT the digest given in the original task text, which
+# does not match any digest present in the reference manifest. Using the
+# cluster-proven digest rather than an unverified one.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: quill-embed-model-cache
+  namespace: quill
+  labels:
+    app: quill-embed
+    app.kubernetes.io/part-of: quill
+    app.kubernetes.io/component: embeddings
+spec:
+  accessModes: ["ReadWriteOnce"]
+  storageClassName: local-path
+  resources:
+    requests:
+      storage: 20Gi
+---
+# Model acquisition is a separate, one-shot Job. Its pod is the only
+# workload allowed public HTTPS egress (see networkpolicies.yaml); the
+# long-lived inference Deployment never receives that capability.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  # Revision-suffixed (both models) like gtm-brain's bge-m3 fetch Job: a
+  # Job's spec is immutable, so a plain re-apply after a revision bump
+  # would fail with a naming collision instead of creating a fresh Job.
+  name: quill-embed-model-prefetch-5617a9f6-953dc6f6
+  namespace: quill
+  labels:
+    app: quill-embed-model-prefetch
+    app.kubernetes.io/part-of: quill
+    app.kubernetes.io/component: embeddings-model-fetch
+  annotations:
+    quill.example.com/model-bge-m3-revision: 5617a9f61b028005a4858fdac845db406aefb181
+    # BAAI/bge-reranker-v2-m3 has no dated release tag; this is the model's
+    # `main`-branch HEAD commit sha, resolved via the HF API 2026-08-06
+    # (huggingface.co/api/models/BAAI/bge-reranker-v2-m3 -> "sha"). Re-verify
+    # before rotating — HF API network access confirmed available.
+    quill.example.com/model-bge-reranker-v2-m3-revision: 953dc6f6f85a1b2dbfca4c34a2796e7dde08d41e
+spec:
+  backoffLimit: 2
+  activeDeadlineSeconds: 3600
+  template:
+    metadata:
+      labels:
+        app: quill-embed-model-prefetch
+        app.kubernetes.io/part-of: quill
+        app.kubernetes.io/component: embeddings-model-fetch
+    spec:
+      automountServiceAccountToken: false
+      restartPolicy: OnFailure
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        fsGroupChangePolicy: OnRootMismatch
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: fetch-immutable-models
+          image: docker.io/michaelf34/infinity@sha256:94db836145f609c508f3f296f3b9bd0e78ae088025e879664d073dfd9f929e96
+          imagePullPolicy: IfNotPresent
+          command: ["python", "-c"]
+          args:
+            - |
+              import os
+              from pathlib import Path
+              from huggingface_hub import snapshot_download
+
+              MODELS = (
+                  dict(repo_id="BAAI/bge-m3", revision=os.environ["BGE_M3_REVISION"],
+                       target=Path("/models/bge-m3"), required=("config.json", "modules.json"),
+                       weight="pytorch_model.bin", min_bytes=1_000_000_000),
+                  dict(repo_id="BAAI/bge-reranker-v2-m3", revision=os.environ["BGE_RERANKER_REVISION"],
+                       target=Path("/models/bge-reranker-v2-m3"), required=("config.json",),
+                       weight="model.safetensors", min_bytes=300_000_000),
+              )
+
+              for m in MODELS:
+                  target = m["target"]
+                  marker = target / ".quill-model-revision"
+                  weight = target / m["weight"]
+                  required = tuple(target / name for name in m["required"]) + (weight,)
+                  ready = (
+                      marker.exists()
+                      and marker.read_text().strip() == m["revision"]
+                      and all(p.is_file() for p in required)
+                      and weight.stat().st_size >= m["min_bytes"]
+                  )
+                  if ready:
+                      continue
+                  target.mkdir(parents=True, exist_ok=True)
+                  snapshot_download(repo_id=m["repo_id"], revision=m["revision"], local_dir=str(target))
+                  if not all(p.is_file() for p in required):
+                      raise RuntimeError(f"immutable {m['repo_id']} snapshot is incomplete")
+                  if weight.stat().st_size < m["min_bytes"]:
+                      raise RuntimeError(f"immutable {m['repo_id']} weight artifact is unexpectedly small")
+                  marker.write_text(m["revision"] + "\n")
+          env:
+            - name: BGE_M3_REVISION
+              value: 5617a9f61b028005a4858fdac845db406aefb181
+            - name: BGE_RERANKER_REVISION
+              value: 953dc6f6f85a1b2dbfca4c34a2796e7dde08d41e
+            - name: HF_HOME
+              value: /models/.huggingface
+            - name: HF_HUB_DISABLE_TELEMETRY
+              value: "1"
+            - name: DO_NOT_TRACK
+              value: "1"
+            - name: HOME
+              value: /tmp
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: "1"
+              memory: 2Gi
+            limits:
+              cpu: "4"
+              memory: 4Gi
+          volumeMounts:
+            - name: model-cache
+              mountPath: /models
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: model-cache
+          persistentVolumeClaim:
+            claimName: quill-embed-model-cache
+        - name: tmp
+          emptyDir:
+            sizeLimit: 1Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: quill-embed
+  namespace: quill
+  labels:
+    app: quill-embed
+    app.kubernetes.io/part-of: quill
+    app.kubernetes.io/component: embeddings
+  annotations:
+    quill.example.com/model-bge-m3-revision: 5617a9f61b028005a4858fdac845db406aefb181
+    quill.example.com/model-bge-reranker-v2-m3-revision: 953dc6f6f85a1b2dbfca4c34a2796e7dde08d41e
+spec:
+  replicas: 3
+  # The model cache is RWO. Never overlap two pods that mount it.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: quill-embed
+  template:
+    metadata:
+      labels:
+        app: quill-embed
+        app.kubernetes.io/part-of: quill
+        app.kubernetes.io/component: embeddings
+      annotations:
+        quill.example.com/model-bge-m3-revision: 5617a9f61b028005a4858fdac845db406aefb181
+        quill.example.com/model-bge-reranker-v2-m3-revision: 953dc6f6f85a1b2dbfca4c34a2796e7dde08d41e
+    spec:
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 60
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        fsGroupChangePolicy: OnRootMismatch
+        seccompProfile:
+          type: RuntimeDefault
+      initContainers:
+        - name: verify-immutable-model
+          image: docker.io/michaelf34/infinity@sha256:94db836145f609c508f3f296f3b9bd0e78ae088025e879664d073dfd9f929e96
+          imagePullPolicy: IfNotPresent
+          command: ["python", "-c"]
+          args:
+            - |
+              import os
+              import time
+              from pathlib import Path
+
+              MODELS = (
+                  (Path("/models/bge-m3"), os.environ["BGE_M3_REVISION"]),
+                  (Path("/models/bge-reranker-v2-m3"), os.environ["BGE_RERANKER_REVISION"]),
+              )
+              deadline = time.monotonic() + 1800
+              while True:
+                  ready = all(
+                      (target / ".quill-model-revision").exists()
+                      and (target / ".quill-model-revision").read_text().strip() == revision
+                      for target, revision in MODELS
+                  )
+                  if ready:
+                      break
+                  if time.monotonic() >= deadline:
+                      raise RuntimeError("immutable embed models were not staged within 1800 seconds")
+                  time.sleep(5)
+          env:
+            - name: BGE_M3_REVISION
+              value: 5617a9f61b028005a4858fdac845db406aefb181
+            - name: BGE_RERANKER_REVISION
+              value: 953dc6f6f85a1b2dbfca4c34a2796e7dde08d41e
+            - name: HOME
+              value: /tmp
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: 250m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 512Mi
+          volumeMounts:
+            - name: model-cache
+              mountPath: /models
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+      containers:
+        - name: embeddings
+          image: docker.io/michaelf34/infinity@sha256:94db836145f609c508f3f296f3b9bd0e78ae088025e879664d073dfd9f929e96
+          imagePullPolicy: IfNotPresent
+          args:
+            - v2
+            - --model-id
+            - /models/bge-m3
+            - --model-id
+            - /models/bge-reranker-v2-m3
+            - --served-model-name
+            - bge-m3
+            - --served-model-name
+            - bge-reranker-v2-m3
+            - --engine
+            - torch
+            - --device
+            - cpu
+            - --batch-size
+            - "16"
+            - --no-trust-remote-code
+            - --port
+            - "7997"
+            - --url-prefix
+            - /v1
+          env:
+            - name: HF_HUB_OFFLINE
+              value: "1"
+            - name: TRANSFORMERS_OFFLINE
+              value: "1"
+            - name: HF_HOME
+              value: /tmp/.huggingface
+            - name: XDG_CACHE_HOME
+              value: /tmp/.cache
+            - name: TORCH_HOME
+              value: /tmp/torch
+            - name: HF_HUB_DISABLE_TELEMETRY
+              value: "1"
+            - name: INFINITY_ANONYMOUS_USAGE_STATS
+              value: "0"
+            - name: DO_NOT_TRACK
+              value: "1"
+            - name: HOME
+              value: /tmp
+            - name: OMP_NUM_THREADS
+              value: "8"
+            - name: MKL_NUM_THREADS
+              value: "8"
+          ports:
+            - name: http
+              containerPort: 7997
+              protocol: TCP
+          startupProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 90
+          readinessProbe:
+            httpGet:
+              path: /v1/models
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 3
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: "4"
+              memory: 12Gi
+            limits:
+              cpu: "8"
+              # 16Gi OOMKilled 2026-08-06 09:34 EDT one hour into a full
+              # corpus index pass; node has 188G. If 28Gi also OOMs, treat
+              # as a leak/batch-size bug in the embed server, not sizing.
+              memory: 28Gi
+          volumeMounts:
+            - name: model-cache
+              mountPath: /models
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: model-cache
+          persistentVolumeClaim:
+            claimName: quill-embed-model-cache
+        - name: tmp
+          emptyDir:
+            sizeLimit: 2Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: quill-embed
+  namespace: quill
+  labels:
+    app: quill-embed
+    app.kubernetes.io/part-of: quill
+    app.kubernetes.io/component: embeddings
+spec:
+  type: ClusterIP
+  selector:
+    app: quill-embed
+  ports:
+    - name: http
+      port: 7997
+      targetPort: http
+      protocol: TCP

@@ -1,0 +1,405 @@
+/* ============================================================
+   Quill Console — global stylesheet.
+   Imports the Example Org design system (dark-first
+   "Charleston" tokens) + the workspace shell, then adds
+   console-only `q-*` classes that consume the SAME tokens. We
+   never hardcode hex here — every color is a semantic token, so
+   both themes work without a separate dark-mode override block.
+   ============================================================ */
+@import url("../design-system/styles.css");
+@import url("../design-system/workspace.css");
+
+/* ---------- Brand lockup (lives at the top of the sidebar) ---------- */
+.q-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+.q-brand__mark {
+  width: 28px;
+  height: 28px;
+  flex: none;
+}
+.q-quill-mark__feather { fill: var(--quill-gold); }
+.q-quill-mark__spine {
+  fill: none;
+  stroke: var(--ink-950);
+  stroke-width: 1.1;
+  stroke-linecap: round;
+  opacity: 0.55;
+}
+.q-quill-mark__nib { fill: var(--ink-950); opacity: 0.7; }
+.q-brand__lockup {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+.q-brand__name {
+  color: #f2ebda;
+  font-family: var(--font-display);
+  font-size: 17px;
+  font-weight: 600;
+  letter-spacing: 0.005em;
+  line-height: 1;
+  white-space: nowrap;
+}
+.q-brand__byline {
+  color: rgba(242, 235, 218, 0.45);
+  font-family: var(--font-mono);
+  font-size: 7.5px;
+  font-weight: 500;
+  letter-spacing: 0.12em;
+  line-height: 1;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+/* ---------- Page scaffold inside the canvas ---------- */
+.q-page {
+  max-width: var(--container-2xl);
+  margin: 0 auto;
+  padding: 24px 28px 48px;
+}
+.q-page--palette {
+  max-width: var(--container-md);
+  padding-top: 64px;
+}
+.q-page__head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 20px;
+}
+.q-page__title {
+  font-family: var(--font-display);
+  font-size: var(--text-h3);
+  font-weight: var(--weight-semibold);
+  letter-spacing: var(--tracking-snug);
+  margin: 0;
+}
+.q-page__sub {
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+  margin: 4px 0 0;
+}
+
+/* ---------- Card ---------- */
+.q-card {
+  background: var(--surface-card);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-card);
+  padding: 18px 20px;
+}
+.q-card + .q-card { margin-top: 16px; }
+.q-card--table { padding: 0; overflow: hidden; }
+.q-card__title {
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+  margin: 0 0 12px;
+}
+
+/* ---------- Table (ops page) ---------- */
+.q-tablewrap { overflow-x: auto; }
+.q-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--text-sm);
+}
+.q-table th {
+  text-align: left;
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-semibold);
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-wide);
+  color: var(--text-muted);
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border-default);
+  white-space: nowrap;
+}
+.q-table td {
+  padding: 11px 14px;
+  border-bottom: 1px solid var(--border-subtle);
+  vertical-align: top;
+}
+.q-table tr:last-child td { border-bottom: none; }
+.q-table tbody tr {
+  transition: background 0.15s ease, box-shadow 0.15s ease;
+}
+.q-table tbody tr:hover {
+  background: var(--surface-hover);
+  box-shadow: inset 3px 0 0 var(--quill-gold);
+}
+.q-mono {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  letter-spacing: var(--tracking-mono);
+}
+
+/* ---------- Error / log lists (ops page) ---------- */
+.q-errorlist, .q-loglist {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+.q-errorlist li, .q-loglist li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 4px 12px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border-subtle);
+  font-size: var(--text-xs);
+}
+.q-errorlist li:last-child, .q-loglist li:last-child { border-bottom: none; }
+.q-errorlist__msg { color: var(--error-text); grid-column: 1 / -1; }
+.q-errorlist__ts, .q-loglist__ts { color: var(--text-muted); text-align: right; }
+.q-loglist li { grid-template-columns: 100px 90px minmax(0, 1fr); align-items: baseline; }
+.q-loglist__stage {
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  font-size: var(--text-2xs);
+  letter-spacing: var(--tracking-wide);
+}
+
+/* ---------- Feedback ---------- */
+.q-alert {
+  border-radius: var(--radius-md);
+  padding: 10px 12px;
+  font-size: var(--text-sm);
+  border: 1px solid transparent;
+  margin-bottom: 16px;
+}
+.q-alert--error { background: var(--error-surface); color: var(--error-text); }
+.q-empty {
+  text-align: center;
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+  padding: 32px 0;
+}
+
+/* ---------- Search palette ---------- */
+.q-palette {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.q-palette__searchbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  height: 56px;
+  padding: 0 18px;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-lg);
+  background: var(--surface-card);
+  box-shadow: var(--shadow-card);
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.q-palette__searchbar:focus-within {
+  border-color: var(--quill-gold);
+  box-shadow: 0 0 0 3px var(--quill-gold-soft);
+}
+.q-palette__searchicon {
+  width: 20px;
+  height: 20px;
+  flex: none;
+  color: var(--text-muted);
+}
+.q-palette__input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--text-primary);
+  font: inherit;
+  font-size: var(--text-lg);
+}
+.q-palette__input::placeholder { color: var(--text-muted); }
+.q-palette__hint {
+  flex: none;
+  padding: 3px 7px;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+}
+
+.q-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.q-chip {
+  height: 28px;
+  padding: 0 12px;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease, color 0.15s ease;
+}
+.q-chip:hover { border-color: var(--border-strong); color: var(--text-primary); }
+.q-chip.is-active {
+  border-color: var(--quill-gold);
+  background: var(--quill-gold-soft);
+  color: var(--text-primary);
+}
+
+.q-results {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.q-result {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 14px 16px;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-lg);
+  background: var(--surface-card);
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease, box-shadow 0.15s ease;
+}
+.q-result:hover { border-color: var(--border-strong); }
+.q-result.is-selected {
+  border-color: var(--quill-gold);
+  background: var(--quill-gold-soft);
+  box-shadow: inset 3px 0 0 var(--quill-gold);
+}
+.q-result__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.q-result__title {
+  font-size: var(--text-md);
+  font-weight: var(--weight-semibold);
+  color: var(--text-primary);
+}
+.q-result__path {
+  margin-top: 3px;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  word-break: break-all;
+}
+.q-result__snippet {
+  margin-top: 8px;
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  line-height: 1.5;
+}
+.q-result__snippet mark {
+  background: var(--quill-gold-soft);
+  color: var(--text-primary);
+  border-radius: 2px;
+  padding: 0 1px;
+}
+.q-result__meta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 8px;
+  color: var(--text-muted);
+  font-size: var(--text-2xs);
+}
+.q-result__match {
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-wide);
+}
+.q-result__copied { color: var(--success-text); }
+
+.q-origin-badge {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: var(--radius-pill);
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-semibold);
+  border: 1px solid var(--border-default);
+  color: var(--text-secondary);
+  background: var(--surface-raised);
+}
+.q-origin-badge--matt { color: var(--indigo-300); border-color: var(--indigo-500); }
+.q-origin-badge--example-org { color: var(--quill-gold); border-color: var(--quill-gold); }
+.q-origin-badge--meridian7 { color: var(--moss-300); border-color: var(--moss-500); }
+.q-origin-badge--example-fitness { color: var(--coral-400); border-color: var(--coral-400); }
+.q-origin-badge--archives { color: var(--bronze-300); border-color: var(--bronze-500); }
+
+.q-palette__footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  color: var(--text-muted);
+  font-size: var(--text-2xs);
+  padding: 0 4px;
+}
+.q-todo {
+  margin: 8px 4px 0;
+  color: var(--text-muted);
+  font-size: var(--text-2xs);
+  line-height: 1.5;
+}
+
+/* ---------- Theme toggle ---------- */
+.q-theme-toggle {
+  width: 32px;
+  height: 32px;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: color 0.15s ease, background 0.15s ease, border-color 0.15s ease, transform 0.15s ease;
+}
+.q-theme-toggle:hover {
+  color: var(--text-primary);
+  border-color: var(--border-default);
+  background: var(--surface-hover);
+}
+.q-theme-toggle:active { transform: translateY(1px); }
+.q-theme-toggle:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+.q-theme-toggle svg {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.65;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+/* dark (the default) shows the sun — the offered action is "switch to
+   light"; an explicit light theme shows the moon. */
+.q-theme-toggle__moon { display: none; }
+:root[data-theme="light"] .q-theme-toggle__sun { display: none; }
+:root[data-theme="light"] .q-theme-toggle__moon { display: block; }
+
+@media (max-width: 640px) {
+  .q-page--palette { padding-top: 32px; }
+  .q-page { padding: 16px 16px 32px; }
+}

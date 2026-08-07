@@ -1,0 +1,124 @@
+# Oxigraph — the Quill knowledge graph (RDF 1.1 + SPARQL 1.1).
+#
+# Replaces the FalkorDB StatefulSet, which was deployed but never written to
+# (the graph was always Phase 2). RDF was chosen over a property graph because
+# the ontology is a published deliverable of this project: real SPARQL, real
+# named graphs for provenance, real SHACL validation, and interoperability with
+# the wider RDF toolchain. See DECISIONS.md 2026-08-07.
+#
+# TWO CONSTRAINTS THAT SHAPE EVERYTHING AROUND THIS SERVICE:
+#   1. Oxigraph performs NO RDFS/OWL entailment. `rdfs:subClassOf` is
+#      documentation and drives SHACL/visualisation — it is never query-time
+#      inference. Writers MUST materialize the full type chain and assert the
+#      concrete property they intend to query.
+#   2. Oxigraph has NO built-in auth. It is reachable only from inside the
+#      namespace, enforced by NetworkPolicy — never exposed through the tunnel.
+apiVersion: v1
+kind: Service
+metadata:
+  name: quill-oxigraph
+  namespace: quill
+  labels:
+    app: quill-oxigraph
+    app.kubernetes.io/part-of: quill
+    app.kubernetes.io/component: knowledge-graph
+spec:
+  clusterIP: None
+  selector:
+    app: quill-oxigraph
+  ports:
+    - name: http
+      port: 7878
+      targetPort: http
+      protocol: TCP
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: quill-oxigraph
+  namespace: quill
+  labels:
+    app: quill-oxigraph
+    app.kubernetes.io/part-of: quill
+    app.kubernetes.io/component: knowledge-graph
+spec:
+  serviceName: quill-oxigraph
+  replicas: 1
+  selector:
+    matchLabels:
+      app: quill-oxigraph
+  template:
+    metadata:
+      labels:
+        app: quill-oxigraph
+        app.kubernetes.io/part-of: quill
+        app.kubernetes.io/component: knowledge-graph
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        fsGroupChangePolicy: OnRootMismatch
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: oxigraph
+          image: ghcr.io/oxigraph/oxigraph:0.5.9
+          imagePullPolicy: IfNotPresent
+          args:
+            - serve
+            - --location=/data
+            - --bind=0.0.0.0:7878
+            # Without this, a query with no FROM only sees the default graph —
+            # and every Quill triple lives in a per-source/per-run named graph
+            # for provenance, so the store would look empty.
+            - --union-default-graph
+          ports:
+            - name: http
+              containerPort: 7878
+              protocol: TCP
+          readinessProbe:
+            httpGet:
+              path: /query?query=ASK%7B%7D
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 5
+          livenessProbe:
+            tcpSocket:
+              port: http
+            initialDelaySeconds: 15
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 6
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: "1"
+              memory: 2Gi
+            limits:
+              # RocksDB-backed; upstream publishes no sizing guidance, so this
+              # is a starting point to be revised against the measured triple
+              # count rather than a researched figure.
+              cpu: "8"
+              memory: 12Gi
+          volumeMounts:
+            - name: data
+              mountPath: /data
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        # nvme-tier0: the graph is hot, and it is fully rebuildable from
+        # Postgres + the corpus, so single-disk NVMe is the right trade.
+        storageClassName: nvme-tier0
+        resources:
+          requests:
+            storage: 100Gi

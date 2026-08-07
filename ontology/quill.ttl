@@ -1,0 +1,1044 @@
+@prefix owl:   <http://www.w3.org/2002/07/owl#> .
+@prefix rdf:   <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix rdfs:  <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix xsd:   <http://www.w3.org/2001/XMLSchema#> .
+@prefix prov:  <http://www.w3.org/ns/prov#> .
+@prefix schema: <https://schema.org/> .
+@prefix foaf:  <http://xmlns.com/foaf/0.1/> .
+@prefix dcterms: <http://purl.org/dc/terms/> .
+@prefix skos:  <http://www.w3.org/2004/02/skos/core#> .
+@prefix quill: <https://quill.example.com/ontology#> .
+@prefix dc11:  <http://purl.org/dc/elements/1.1/> .
+
+<https://quill.example.com/ontology> a owl:Ontology ;
+    dcterms:title "Quill Ontology" ;
+    dcterms:description """Purpose-built ontology for personal + small-business file/photo
+        archive search with full provenance. Not an upper ontology — every class exists
+        because a competency question (see RATIONALE) needs it.""" ;
+    owl:versionInfo "0.1.0" ;
+    dcterms:created "2026-08-07"^^xsd:date .
+
+# Reuse map (documented once, not re-declared as local terms):
+#   prov:  Entity/Activity/Agent/SoftwareAgent, wasGeneratedBy, used, wasDerivedFrom,
+#          wasAttributedTo, wasAssociatedWith, actedOnBehalfOf, generatedAtTime,
+#          startedAtTime, endedAtTime, invalidatedAtTime  — the provenance skeleton (§3).
+#   foaf:  Person, Organization, name                      — identity vocabulary.
+#   schema: Event, Place, Invoice, Message, name, sender, recipient, dateSent,
+#          messageAttachment, attendee, worksFor, about, startDate, endDate,
+#          totalPaymentDue, paymentDueDate, provider, customer, referencesOrder
+#          — reused wherever schema.org's property is already FLAT (no intermediate
+#          node). Where schema.org nests through PostalAddress/GeoCoordinates/
+#          PriceSpecification, Quill deliberately flattens to scalar quill: properties
+#          instead (see Media section) — SPARQL traversal cost compounds at GraphRAG
+#          query volumes (the grounding algorithm does bounded multi-hop expansion per
+#          query), and one avoidable blank-node hop per place/price lookup is a real
+#          cost at that volume. This is an internal KG, not published linked data, so
+#          strict schema.org shape isn't a goal; a CONSTRUCT query can re-nest for
+#          export if that's ever needed.
+#   skos:  Concept, prefLabel, altLabel, broader, narrower  — Topic only.
+#   dcterms: creator, title, language                        — document authorship/meta.
+
+
+# ============================================================
+# CORE — corpus structure (File, Document, Chunk, Folder, roots, machines)
+# ============================================================
+
+quill:CorpusRoot a owl:Class ;
+    rdfs:label "Corpus Root" ;
+    rdfs:comment """A configured ingest root from sources.json — the 'Drive/Source'
+        concept (cloud-drives, archives, mac-sync, inbox, git-mirrors). One instance
+        per entry in sources.json, config-level, effectively static.""" .
+
+quill:IngestSubsystem a owl:Class ;
+    rdfs:label "Ingest Subsystem" ;
+    rdfs:comment "Which Quill subsystem produced a record: files (NFS scan) or immich (photo metadata API). Mirrors CONTRACT.md's `source` field." .
+
+quill:Origin a owl:Class ;
+    rdfs:comment """The provenance partition CONTRACT.md calls `origin` (matt,
+        example-org, meridian7, example-fitness, archives, jon-snow,
+        matts-mac-studio, workstation, inbox, git-mirrors...). Deliberately NOT a
+        prov:Agent — an origin string is a partition label, not a thing that bears
+        responsibility. quill:resolvesTo links it to the Person/Organization/Machine
+        it actually denotes, once known.""" ;
+    rdfs:label "Origin" .
+
+quill:Machine a owl:Class ;
+    rdfs:label "Machine" ;
+    rdfs:comment "A physical/virtual device that produced a mac-sync backup subtree (jon-snow, matts-mac-studio, workstation). Under mac-sync, `origin` values ARE machine hostnames." .
+
+quill:Folder a owl:Class ;
+    rdfs:label "Folder" ;
+    rdfs:comment "A directory, derived deterministically from path parsing at scan time." .
+
+quill:File a owl:Class ;
+    rdfs:subClassOf prov:Entity ;
+    rdfs:label "File" ;
+    rdfs:comment "Any file discovered under a corpus root. The base node for every physical artifact — see quill:Document for the text-extracted subtype." .
+
+quill:Document a owl:Class ;
+    rdfs:subClassOf quill:File ;
+    rdfs:label "Document" ;
+    rdfs:comment "A File whose bytes were successfully extracted to text (anydoc primary, docling fallback for scanned PDFs)." .
+
+quill:Chunk a owl:Class ;
+    rdfs:subClassOf prov:Entity ;
+    rdfs:label "Chunk" ;
+    rdfs:comment "A 500-token window of a Document's (or Photo's aggregated OCR) extracted text — the unit that gets embedded into Qdrant. See §6 for the grounding bridge." .
+
+
+# ============================================================
+# PEOPLE & ORGS — identity resolution is first-class
+# ============================================================
+
+quill:Person a owl:Class ;
+    rdfs:subClassOf foaf:Person, prov:Agent ;
+    rdfs:label "Person" ;
+    rdfs:comment "A resolved human identity. One Person may accumulate many quill:Identity aliases (email, git author string, Immich person, phone)." .
+
+quill:Organization a owl:Class ;
+    rdfs:subClassOf foaf:Organization, schema:Organization, prov:Agent ;
+    rdfs:label "Organization" .
+
+quill:Identity a owl:Class ;
+    rdfs:subClassOf prov:Entity ;
+    rdfs:label "Identity" ;
+    rdfs:comment """One alias/surface-form for a Person or Organization: an email
+        address, a git author string, an Immich person-cluster ID, a phone number, a
+        device hostname. Reified deliberately (n-ary pattern) because each alias
+        carries its own resolution confidence and provenance, distinct from the
+        Person's.""" .
+
+
+# ============================================================
+# CONTENT
+# ============================================================
+
+quill:Topic a owl:Class ;
+    rdfs:subClassOf skos:Concept ;
+    rdfs:label "Topic" ;
+    rdfs:comment "A theme/subject a Chunk or Document is about (skos:prefLabel for the canonical name). LLM-extracted (§7)." .
+
+quill:Event a owl:Class ;
+    rdfs:subClassOf schema:Event ;
+    rdfs:label "Event" ;
+    rdfs:comment "A dated real-world happening (trip, milestone) — use schema:startDate/endDate, schema:location." .
+
+quill:Project a owl:Class ;
+    rdfs:label "Project" ;
+    rdfs:comment """NOT subclassed from schema:Project — schema.org models Project as
+        a subtype of Organization, a poor semantic fit (a Quill project is a body of
+        work, not an org). Kept standalone; schema:name reused for the display
+        name.""" .
+
+quill:Task a owl:Class ;
+    rdfs:label "Task" ;
+    rdfs:comment "A Linear (or equivalent) issue/task — Phase 2 stub, modeled now for schema stability." .
+
+quill:Communication a owl:Class ;
+    rdfs:subClassOf schema:Message, prov:Entity ;
+    rdfs:label "Communication" ;
+    rdfs:comment "An email or message. Reuses schema:sender/recipient/dateSent/messageAttachment directly (all flat, no nesting needed)." .
+
+quill:Meeting a owl:Class ;
+    rdfs:subClassOf quill:Event ;
+    rdfs:label "Meeting" ;
+    rdfs:comment "An Event with attendees (schema:attendee reused)." .
+
+
+# ============================================================
+# FINANCIAL / LEGAL — this corpus is full of them
+# ============================================================
+
+quill:FinancialLegalDocument a owl:Class ;
+    rdfs:subClassOf quill:Document ;
+    rdfs:label "Financial/Legal Document" ;
+    rdfs:comment "Abstract-ish common parent for Contract/Invoice/Statement/TaxDocument/Policy — shared counterparty/date/amount properties live here." .
+
+quill:Contract a owl:Class ;
+    rdfs:subClassOf quill:FinancialLegalDocument ;
+    rdfs:label "Contract" .
+
+quill:Invoice a owl:Class ;
+    rdfs:subClassOf quill:FinancialLegalDocument, schema:Invoice ;
+    rdfs:label "Invoice" ;
+    rdfs:comment "Reuses schema:totalPaymentDue, schema:paymentDueDate, schema:provider, schema:customer, schema:referencesOrder — all flat schema.org properties, genuine fit." .
+
+quill:Statement a owl:Class ;
+    rdfs:subClassOf quill:FinancialLegalDocument ;
+    rdfs:label "Statement" ;
+    rdfs:comment "Bank/brokerage/utility statement — no clean schema.org analog, custom properties." .
+
+quill:TaxDocument a owl:Class ;
+    rdfs:subClassOf quill:FinancialLegalDocument ;
+    rdfs:label "Tax Document" .
+
+quill:Policy a owl:Class ;
+    rdfs:subClassOf quill:FinancialLegalDocument ;
+    rdfs:label "Policy" ;
+    rdfs:comment "Insurance or business policy document." .
+
+
+# ============================================================
+# MEDIA — Immich metadata + OCR text ONLY, never image bytes
+# ============================================================
+# Design invariant, enforced by omission: no property below stores or references an
+# image/video byte, thumbnail, or download URL. This mirrors the API-permission
+# boundary (asset.read only, never asset.download) from the Immich research — the
+# ontology cannot leak bytes because no predicate exists to carry them.
+
+quill:Photo a owl:Class ;
+    rdfs:subClassOf prov:Entity ;
+    rdfs:label "Photo" ;
+    rdfs:comment "An Immich asset, metadata only. Not a subclass of quill:File — it has no NFS path, it has an Immich asset ID." .
+
+quill:Album a owl:Class ;
+    rdfs:label "Album" .
+
+quill:Place a owl:Class ;
+    rdfs:subClassOf schema:Place ;
+    rdfs:label "Place" ;
+    rdfs:comment "City/state/country flattened to quill:placeCity/Region/Country rather than schema:address->PostalAddress nesting — see the reuse-map note at the top of this file." .
+
+quill:Face a owl:Class ;
+    rdfs:subClassOf prov:Entity ;
+    rdfs:label "Face" ;
+    rdfs:comment "One detected face region on a Photo, mirroring Immich's /faces and AssetResponseDto.people/unassignedFaces shape. May or may not resolve to a Person (unclustered faces have none)." .
+
+quill:OcrRegion a owl:Class ;
+    rdfs:subClassOf prov:Entity ;
+    rdfs:label "OCR Region" ;
+    rdfs:comment "One detected text region from Immich's /assets/{id}/ocr, normalized quad corners preserved faithfully rather than collapsed to a bounding box, since text can be rotated." .
+
+
+# ============================================================
+# PROVENANCE
+# ============================================================
+
+quill:Claim a owl:Class ;
+    rdfs:subClassOf prov:Entity ;
+    rdfs:label "Claim" ;
+    rdfs:comment """A single LLM/heuristic-extracted assertion, reified so it can carry
+        confidence + bi-temporal validity independent of the fact it asserts. See §3
+        for the full provenance model and §7 for exactly which facts require this vs.
+        which are written as plain deterministic triples.""" .
+
+quill:PipelineRun a owl:Class ;
+    rdfs:subClassOf prov:Activity ;
+    rdfs:label "Pipeline Run" ;
+    rdfs:comment "One invocation of one pipeline stage. quill:runId matches Postgres ingest_log.run_id — a direct bridge between the RDF layer and the existing audit ledger, not a duplicate ledger." .
+
+quill:isGroundedEntityType a owl:AnnotationProperty ;
+    rdfs:label "is grounded entity type" ;
+    rdfs:comment "Applied to a CLASS (not an instance): true means instances of this class get embedded into the quill_entities Qdrant collection. See §6." .
+
+quill:Person quill:isGroundedEntityType true .
+quill:Organization quill:isGroundedEntityType true .
+quill:Topic quill:isGroundedEntityType true .
+quill:Project quill:isGroundedEntityType true .
+quill:Place quill:isGroundedEntityType true .
+quill:Album quill:isGroundedEntityType true .
+
+
+# ============================================================
+# PROPERTIES — Core
+# ============================================================
+
+quill:path a owl:DatatypeProperty ; rdfs:label "path" ; rdfs:domain quill:Folder ; rdfs:range xsd:string ;
+    rdfs:comment "quill:File also uses this property; domain left informal (File ∪ Folder) rather than declaring a union class." .
+quill:root a owl:ObjectProperty ; rdfs:range quill:CorpusRoot ; rdfs:comment "domain: File, Folder, Photo (Photo's root is always qid:sys-immich's implicit non-root — see quill:subsystem instead for Photo)." .
+quill:origin a owl:ObjectProperty ; rdfs:range quill:Origin ; rdfs:comment "domain: File, Folder, Photo, Chunk, Communication, Claim — the CONTRACT.md non-negotiable provenance field, upgraded from a string to a resource." .
+quill:subsystem a owl:ObjectProperty ; rdfs:range quill:IngestSubsystem .
+quill:embedPolicy a owl:DatatypeProperty ; rdfs:domain quill:CorpusRoot ; rdfs:range xsd:string ; rdfs:comment "'documents' | 'none' — mirrors sources.json embed policy." .
+quill:mountPath a owl:DatatypeProperty ; rdfs:domain quill:CorpusRoot ; rdfs:range xsd:string .
+quill:hostname a owl:DatatypeProperty ; rdfs:domain quill:Machine ; rdfs:range xsd:string .
+quill:resolvesTo a owl:ObjectProperty ; rdfs:domain quill:Origin ; rdfs:comment "range: Person ∪ Organization ∪ Machine, whichever the origin partition denotes. Absent when unresolved (e.g. 'archives', 'inbox')." .
+quill:inFolder a owl:ObjectProperty ; rdfs:domain quill:File ; rdfs:range quill:Folder .
+quill:parentFolder a owl:ObjectProperty ; rdfs:domain quill:Folder ; rdfs:range quill:Folder .
+quill:looksLikeProject a owl:DatatypeProperty ; rdfs:domain quill:Folder ; rdfs:range xsd:boolean ;
+    rdfs:comment "Cheap regex/heuristic flag, NOT an LLM call and NOT a Claim — but also not asserted as fact: it seeds candidate Projects for review, never auto-links quill:relatesToProject on its own (see §7)." .
+quill:filename a owl:DatatypeProperty ; rdfs:domain quill:File ; rdfs:range xsd:string .
+quill:extension a owl:DatatypeProperty ; rdfs:domain quill:File ; rdfs:range xsd:string .
+quill:sizeBytes a owl:DatatypeProperty ; rdfs:domain quill:File ; rdfs:range xsd:integer .
+quill:mtime a owl:DatatypeProperty ; rdfs:domain quill:File ; rdfs:range xsd:dateTime .
+quill:contentHash a owl:DatatypeProperty ; rdfs:domain quill:File ; rdfs:range xsd:string .
+quill:pageCount a owl:DatatypeProperty ; rdfs:domain quill:Document ; rdfs:range xsd:integer .
+quill:extractionEngine a owl:DatatypeProperty ; rdfs:domain quill:Document ; rdfs:range xsd:string ; rdfs:comment "'anydoc' | 'docling'." .
+quill:extractionTruncated a owl:DatatypeProperty ; rdfs:domain quill:Document ; rdfs:range xsd:boolean .
+quill:chunkIndex a owl:DatatypeProperty ; rdfs:domain quill:Chunk ; rdfs:range xsd:integer .
+quill:text a owl:DatatypeProperty ; rdfs:domain quill:Chunk ; rdfs:range xsd:string .
+quill:tokenCount a owl:DatatypeProperty ; rdfs:domain quill:Chunk ; rdfs:range xsd:integer .
+quill:hasChunk a owl:ObjectProperty ; rdfs:range quill:Chunk ; rdfs:comment "domain: File ∪ Photo. Inverse of prov:wasDerivedFrom for query convenience." .
+quill:hasChunk owl:inverseOf prov:wasDerivedFrom .
+
+# --- grounding bridge properties (see §6) ---
+quill:qdrantPointId a owl:DatatypeProperty ; rdfs:range xsd:string ;
+    rdfs:comment "domain: Chunk ∪ any class with quill:isGroundedEntityType true. The literal Qdrant point ID — this triple IS the KG<->vector bridge." .
+quill:qdrantCollection a owl:DatatypeProperty ; rdfs:range xsd:string ; rdfs:comment "'quill_chunks' | 'quill_entities' — disambiguates which collection qdrantPointId names." .
+quill:embeddingModel a owl:DatatypeProperty ; rdfs:range xsd:string .
+quill:embeddingModelRevision a owl:DatatypeProperty ; rdfs:range xsd:string .
+quill:degree a owl:DatatypeProperty ; rdfs:range xsd:integer ;
+    rdfs:comment "Cached mention/edge count on a grounded entity, refreshed periodically (not per-query). Used for the hub-damping term in the retrieval algorithm (§6/grounding research)." .
+quill:hasSummary a owl:DatatypeProperty ; rdfs:range xsd:string ;
+    rdfs:comment "LLM-accumulated description of a grounded entity — is BOTH the text that gets embedded (§6) and the source for lazy community summaries. Claim-backed (§7)." .
+
+# ============================================================
+# PROPERTIES — People & identity
+# ============================================================
+
+quill:hasIdentity a owl:ObjectProperty ; rdfs:range quill:Identity .
+# domain declared once, below, as prov:Agent — see the widening note. Declaring
+# rdfs:domain twice would mean INTERSECTION under RDFS, not union.
+quill:identityOf a owl:ObjectProperty ; rdfs:domain quill:Identity ; owl:inverseOf quill:hasIdentity .
+# range declared once, below, as prov:Agent.
+quill:identityType a owl:DatatypeProperty ; rdfs:domain quill:Identity ; rdfs:range xsd:string ;
+    rdfs:comment "'email' | 'phone' | 'git-author' | 'immich-person' | 'device-hostname' | 'username'." .
+quill:identityValue a owl:DatatypeProperty ; rdfs:domain quill:Identity ; rdfs:range xsd:string .
+quill:identityConfidence a owl:DatatypeProperty ; rdfs:domain quill:Identity ; rdfs:range xsd:decimal .
+
+# ============================================================
+# PROPERTIES — Content
+# ============================================================
+
+quill:relatesToProject a owl:ObjectProperty ; rdfs:range quill:Project ; rdfs:comment "domain: File ∪ Communication ∪ Task." .
+quill:threadId a owl:DatatypeProperty ; rdfs:domain quill:Communication ; rdfs:range xsd:string .
+quill:subjectLine a owl:DatatypeProperty ; rdfs:domain quill:Communication ; rdfs:range xsd:string .
+quill:assignee a owl:ObjectProperty ; rdfs:domain quill:Task ; rdfs:range quill:Person .
+quill:status a owl:DatatypeProperty ; rdfs:domain quill:Task ; rdfs:range xsd:string .
+quill:dueDate a owl:DatatypeProperty ; rdfs:domain quill:Task ; rdfs:range xsd:date .
+quill:externalId a owl:DatatypeProperty ; rdfs:range xsd:string ; rdfs:comment "domain: Task ∪ Contract ∪ etc — external system's own ID (e.g. Linear issue key)." .
+quill:mentions a owl:ObjectProperty ; rdfs:comment "domain: Chunk. range: any entity. The core RAG-grounding relation — see §7 for its Claim-backing rule." .
+
+# ============================================================
+# PROPERTIES — Financial/legal
+# ============================================================
+
+quill:counterparty a owl:ObjectProperty ; rdfs:domain quill:FinancialLegalDocument ; rdfs:comment "range: Person ∪ Organization." .
+quill:effectiveDate a owl:DatatypeProperty ; rdfs:domain quill:FinancialLegalDocument ; rdfs:range xsd:date .
+quill:amount a owl:DatatypeProperty ; rdfs:domain quill:FinancialLegalDocument ; rdfs:range xsd:decimal .
+quill:currency a owl:DatatypeProperty ; rdfs:domain quill:FinancialLegalDocument ; rdfs:range xsd:string ; rdfs:comment "ISO 4217." .
+quill:signedDate a owl:DatatypeProperty ; rdfs:domain quill:Contract ; rdfs:range xsd:date .
+quill:renewalDate a owl:DatatypeProperty ; rdfs:domain quill:Contract ; rdfs:range xsd:date .
+quill:contractParty a owl:ObjectProperty ; rdfs:domain quill:Contract ; rdfs:comment "range: Person ∪ Organization, multivalued." .
+quill:accountLast4 a owl:DatatypeProperty ; rdfs:domain quill:Statement ; rdfs:range xsd:string .
+quill:statementPeriodStart a owl:DatatypeProperty ; rdfs:domain quill:Statement ; rdfs:range xsd:date .
+quill:statementPeriodEnd a owl:DatatypeProperty ; rdfs:domain quill:Statement ; rdfs:range xsd:date .
+quill:issuer a owl:ObjectProperty ; rdfs:range quill:Organization ; rdfs:comment "domain: Statement ∪ Policy." .
+quill:taxYear a owl:DatatypeProperty ; rdfs:domain quill:TaxDocument ; rdfs:range xsd:gYear .
+quill:taxFormType a owl:DatatypeProperty ; rdfs:domain quill:TaxDocument ; rdfs:range xsd:string ; rdfs:comment "'W2' | '1099-NEC' | '1099-K' | 'Schedule-C' | ..." .
+quill:policyNumber a owl:DatatypeProperty ; rdfs:domain quill:Policy ; rdfs:range xsd:string .
+quill:coverageType a owl:DatatypeProperty ; rdfs:domain quill:Policy ; rdfs:range xsd:string .
+quill:carrier a owl:ObjectProperty ; rdfs:domain quill:Policy ; rdfs:range quill:Organization ; rdfs:subPropertyOf quill:issuer .
+quill:expirationDate a owl:DatatypeProperty ; rdfs:domain quill:Policy ; rdfs:range xsd:date .
+quill:paidTo a owl:ObjectProperty ; rdfs:comment "domain: Person ∪ Organization. range: Person ∪ Organization. Almost always Claim-backed (§7)." .
+
+# ============================================================
+# PROPERTIES — Media
+# ============================================================
+
+quill:immichAssetId a owl:DatatypeProperty ; rdfs:domain quill:Photo ; rdfs:range xsd:string .
+quill:checksum a owl:DatatypeProperty ; rdfs:domain quill:Photo ; rdfs:range xsd:string ; rdfs:comment "SHA1, base64 — Immich's own asset checksum, NOT a byte pointer." .
+quill:originalFileName a owl:DatatypeProperty ; rdfs:domain quill:Photo ; rdfs:range xsd:string ; rdfs:comment "Filename as metadata only — never resolvable to bytes from this graph." .
+quill:takenAt a owl:DatatypeProperty ; rdfs:domain quill:Photo ; rdfs:range xsd:dateTime .
+quill:cameraMake a owl:DatatypeProperty ; rdfs:domain quill:Photo ; rdfs:range xsd:string .
+quill:cameraModel a owl:DatatypeProperty ; rdfs:domain quill:Photo ; rdfs:range xsd:string .
+quill:isFavorite a owl:DatatypeProperty ; rdfs:domain quill:Photo ; rdfs:range xsd:boolean .
+quill:isArchived a owl:DatatypeProperty ; rdfs:domain quill:Photo ; rdfs:range xsd:boolean .
+quill:latitude a owl:DatatypeProperty ; rdfs:domain quill:Photo ; rdfs:range xsd:double ; rdfs:comment "Raw EXIF coordinate on the Photo itself, flat (see quill:Place for the resolved place entity)." .
+quill:longitude a owl:DatatypeProperty ; rdfs:domain quill:Photo ; rdfs:range xsd:double .
+quill:place a owl:ObjectProperty ; rdfs:domain quill:Photo ; rdfs:range quill:Place .
+quill:placeCity a owl:DatatypeProperty ; rdfs:domain quill:Place ; rdfs:range xsd:string .
+quill:placeRegion a owl:DatatypeProperty ; rdfs:domain quill:Place ; rdfs:range xsd:string .
+quill:placeCountry a owl:DatatypeProperty ; rdfs:domain quill:Place ; rdfs:range xsd:string .
+quill:hasPhoto a owl:ObjectProperty ; rdfs:domain quill:Album ; rdfs:range quill:Photo .
+quill:memberOfAlbum a owl:ObjectProperty ; rdfs:domain quill:Photo ; rdfs:range quill:Album ; owl:inverseOf quill:hasPhoto .
+quill:assetCount a owl:DatatypeProperty ; rdfs:domain quill:Album ; rdfs:range xsd:integer .
+quill:detectedIn a owl:ObjectProperty ; rdfs:range quill:Photo ; rdfs:comment "domain: Face ∪ OcrRegion." .
+quill:depictsPerson a owl:ObjectProperty ; rdfs:domain quill:Face ; rdfs:range quill:Person ; rdfs:comment "Absent for unclustered faces." .
+quill:faceSourceType a owl:DatatypeProperty ; rdfs:domain quill:Face ; rdfs:range xsd:string ; rdfs:comment "'clustered' | 'unassigned'." .
+quill:boundingBoxX1 a owl:DatatypeProperty ; rdfs:domain quill:Face ; rdfs:range xsd:double .
+quill:boundingBoxY1 a owl:DatatypeProperty ; rdfs:domain quill:Face ; rdfs:range xsd:double .
+quill:boundingBoxX2 a owl:DatatypeProperty ; rdfs:domain quill:Face ; rdfs:range xsd:double .
+quill:boundingBoxY2 a owl:DatatypeProperty ; rdfs:domain quill:Face ; rdfs:range xsd:double .
+quill:appearsIn a owl:ObjectProperty ; rdfs:domain quill:Photo ; rdfs:range quill:Person ;
+    rdfs:comment "Materialized convenience edge derived from Face records at graphify time (Immich's own high-trust face clustering, not a Quill Claim — see §7). Matches PLAN.md's APPEARS_IN edge." .
+quill:ocrText a owl:DatatypeProperty ; rdfs:domain quill:OcrRegion ; rdfs:range xsd:string .
+quill:textScore a owl:DatatypeProperty ; rdfs:domain quill:OcrRegion ; rdfs:range xsd:double .
+quill:boxScore a owl:DatatypeProperty ; rdfs:domain quill:OcrRegion ; rdfs:range xsd:double .
+quill:x1 a owl:DatatypeProperty ; rdfs:domain quill:OcrRegion ; rdfs:range xsd:double .
+quill:y1 a owl:DatatypeProperty ; rdfs:domain quill:OcrRegion ; rdfs:range xsd:double .
+quill:x2 a owl:DatatypeProperty ; rdfs:domain quill:OcrRegion ; rdfs:range xsd:double .
+quill:y2 a owl:DatatypeProperty ; rdfs:domain quill:OcrRegion ; rdfs:range xsd:double .
+quill:x3 a owl:DatatypeProperty ; rdfs:domain quill:OcrRegion ; rdfs:range xsd:double .
+quill:y3 a owl:DatatypeProperty ; rdfs:domain quill:OcrRegion ; rdfs:range xsd:double .
+quill:x4 a owl:DatatypeProperty ; rdfs:domain quill:OcrRegion ; rdfs:range xsd:double .
+quill:y4 a owl:DatatypeProperty ; rdfs:domain quill:OcrRegion ; rdfs:range xsd:double .
+# 8 discrete floats rather than one WKT-polygon literal: faithful 1:1 mapping to the
+# Immich AssetOcrResponseDto shape, so the sync writer is a flat field copy, not a
+# geometry-encoding step. Not worth a GeoSPARQL dependency for 8 floats.
+
+# ============================================================
+# PROPERTIES — Provenance
+# ============================================================
+
+quill:confidence a owl:DatatypeProperty ; rdfs:domain quill:Claim ; rdfs:range xsd:decimal .
+quill:claimSubject a owl:ObjectProperty ; rdfs:domain quill:Claim ; rdfs:comment "range: any entity IRI." .
+quill:claimPredicate a owl:ObjectProperty ; rdfs:domain quill:Claim ; rdfs:range rdf:Property ;
+    rdfs:comment "Value is the actual property IRI being asserted (e.g. schema:worksFor, quill:paidTo) — punned as data, standard RDF, no OWL-Full issue for a non-reasoning store." .
+quill:claimObject a owl:ObjectProperty ; rdfs:domain quill:Claim ; rdfs:comment "range: any entity IRI, or a literal for datatype-valued claims." .
+quill:validFrom a owl:DatatypeProperty ; rdfs:domain quill:Claim ; rdfs:range xsd:date .
+quill:validTo a owl:DatatypeProperty ; rdfs:domain quill:Claim ; rdfs:range xsd:date .
+quill:supersededBy a owl:ObjectProperty ; rdfs:domain quill:Claim ; rdfs:range quill:Claim .
+quill:materialized a owl:DatatypeProperty ; rdfs:domain quill:Claim ; rdfs:range xsd:boolean ;
+    rdfs:comment "Cached flag, kept in sync by the writer: true iff this claim's fact is ALSO asserted directly in qid:g-state-materialized (see §3). Not a source of truth — rebuildable." .
+quill:stage a owl:DatatypeProperty ; rdfs:domain quill:PipelineRun ; rdfs:range xsd:string ;
+    rdfs:comment "'scan'|'extract'|'index'|'graphify'|'enrich'|'resolve'|'immich-sync' — matches Postgres ingest_log.stage exactly." .
+quill:runId a owl:DatatypeProperty ; rdfs:domain quill:PipelineRun ; rdfs:range xsd:string .
+
+# ============================================================
+# RELATIONSHIP LAYER — enrichment pass
+# ============================================================
+#
+# Method note: Oxigraph performs NO RDFS/OWL entailment (Hard Constraint 1).
+# Every owl:inverseOf / owl:TransitiveProperty / owl:SymmetricProperty /
+# owl:FunctionalProperty below is declared for documentation, SHACL, and the
+# visualizer ONLY — it never makes a query transitive or a triple appear for
+# free. Each declaration that changes traversal is paired with the concrete
+# SPARQL property path or triple pattern that actually implements it.
+#
+# Audit context: several classes previously read as "disconnected" only
+# because reused external predicates (schema:sender, schema:provider, ...)
+# and a few quill: properties (quill:detectedIn, quill:issuer, ...) were
+# used correctly in instance data and in this file's own prose comments,
+# but never given a formal local rdfs:domain/rdfs:range. A tool that loads
+# only quill.ttl (SHACL, the React Flow visualizer, an ontology linter)
+# cannot see those edges until they're restated here. That restatement is
+# most of what follows; genuinely new quill: terms are called out as such.
+
+
+# ------------------------------------------------------------
+# §A — ORPHAN CLASSES, walked one at a time
+# ------------------------------------------------------------
+# Each subsection names the fix and where its triples actually land (§B
+# inverses, §C hierarchy, §D characteristics, §E completions of existing
+# quill: properties, §F local restatement of reused external terms) so nothing
+# below is declared twice.
+
+# --- 1. Communication (the real gap) ---------------------------------
+# Fix lands in §F (schema:sender/recipient/dateSent/messageAttachment locally
+# scoped to Communication), §B (quill:senderOf/recipientOf inverses), §C
+# (schema:sender/recipient folded under quill:involves), §E (quill:hasChunk
+# domain extended to Communication so message bodies are chunkable/embeddable
+# like any Document). One genuinely new term below: thread causality, which
+# has no clean flat external analog.
+
+quill:inReplyTo a owl:ObjectProperty ;
+    rdfs:label "in reply to" ;
+    rdfs:domain quill:Communication ;
+    rdfs:range quill:Communication ;
+    rdfs:comment """New quill: term — schema.org's reply modeling goes
+        through schema:Comment, a poor fit for email/chat threading, so no
+        flat external predicate was reused. Models the IMMEDIATE parent
+        message only (see §D on why this is deliberately not declared
+        owl:TransitiveProperty). Complements, does not replace, the existing
+        flat quill:threadId string: threadId is an O(1) grouping key
+        matching the mail provider's own thread ID; inReplyTo is the precise
+        causal edge — different granularity, both earn their place.
+        Full ancestor chain: SELECT ?ancestor WHERE
+        { ?msg quill:inReplyTo+ ?ancestor }""" .
+
+# --- 2. Document (mostly documentation, one genuine addition) --------
+# inFolder/root/origin/hasChunk already apply concretely (Document is
+# co-typed File). The one real gap — aboutness — is fixed once in §F via
+# schema:about, shared with Topic (#11 below) rather than duplicated per
+# class. Creator provenance is fixed in §F via the dc11:/dcterms: split
+# (see the callout there for why one term is NOT enough).
+
+# --- 3. Event ----------------------------------------------------------
+# schema:location/startDate/endDate locally scoped in §F. quill:relatesToProject
+# domain extended to include Event in §E (CQ2/CQ12). The one class-level fix
+# that belongs here directly:
+
+quill:Event rdfs:subClassOf prov:Entity .
+# Event is written by a PipelineRun and can be prov:wasDerivedFrom'd (see
+# Meeting below) — without prov:Entity in its type chain those PROV-O edges
+# have no formal home on it. Same gap exists on Folder/Album/Place/Project/
+# Topic (some already carry prov:wasGeneratedBy triples in the shipped
+# A-box) — flagged as a fast-follow, not fixed here to keep this pass scoped
+# to the 11 named orphans.
+
+# --- 4. Meeting (subClassOf Event) -------------------------------------
+# schema:attendee/organizer locally scoped in §F (organizer scoped to Event,
+# inherited by Meeting via multityping — writers materialize the full type
+# chain per the design-doc rule, so the instance itself is typed Event and
+# the domain restriction holds without needing entailment).
+# "aboutProject" — reuses quill:relatesToProject (Event-domain extension,
+# §E), no new term. "derivedFromCommunication" — reuses prov:wasDerivedFrom
+# directly at the instance level (Meeting -> Communication): an exact fit
+# now that Event is prov:Entity, and prov:wasDerivedFrom's own PROV-O domain/
+# range (prov:Entity -> prov:Entity) already covers this without a local
+# restriction, so no new triple is needed here beyond #3 above.
+# Honesty note, same category as the wasGeneratedBy-on-Agents looseness
+# flagged in §F: the base file already declares
+# quill:hasChunk owl:inverseOf prov:wasDerivedFrom, so a
+# Meeting-prov:wasDerivedFrom->Communication instance triple would, under
+# strict OWL semantics (never applied by Oxigraph — Hard Constraint 1),
+# entail an ill-typed Communication-quill:hasChunk->Meeting triple. Harmless
+# under this store; flagged rather than silently shipped.
+
+# --- 5. OcrRegion --------------------------------------------------------
+# quill:detectedIn domain extended to Face ∪ OcrRegion in §E — this alone
+# connects every OcrRegion to its Photo (range Photo already declared).
+# Deliberately NOT wiring quill:mentions directly onto OcrRegion instances:
+# a Photo's aggregated OCR text is embedded through quill:Chunk exactly like
+# Document text (prov:wasDerivedFrom -> Photo), so entity-linking has one
+# code path for both. The correct 3-hop traversal for "what does this OCR
+# text relate to" reuses that single Chunk-level mention cascade instead of
+# re-running extraction per raw OCR region at 976,000-row scale:
+#   ?region quill:detectedIn ?photo .
+#   ?chunk prov:wasDerivedFrom ?photo ; quill:mentions ?entity .
+
+# --- 6. PipelineRun (false positive on the raw count, real T-box gap) --
+# Already connects correctly via reused PROV-O terms (prov:wasAssociatedWith,
+# prov:wasGeneratedBy, prov:used) — the "0 quill:-namespace object
+# properties" reading only measured local-namespace terms. Fix is restating
+# PROV-O's own domain/range locally (§F) so a tool that loads only quill.ttl
+# can see the edges, NOT a new quill:producedBy alongside prov:wasGeneratedBy
+# — that would be exactly the redundant padding constraint #4 forbids.
+
+# --- 7 & 8. Statement, TaxDocument --------------------------------------
+# Both resolved by the same fix: quill:issuer's domain (§E) formalized as
+# Statement ∪ Policy ∪ TaxDocument — an employer/brokerage issuing a
+# W-2/1099 is the same relationship shape as a bank issuing a statement.
+# quill:counterparty's range completed in §E; both subclasses inherit it via
+# multityping (FinancialLegalDocument). No new properties.
+
+# --- 9. Invoice ----------------------------------------------------------
+# Same pattern as Communication/PipelineRun: schema:provider/customer/
+# totalPaymentDue/paymentDueDate were "reused" only in prose. Locally scoped
+# in §F. No new property needed.
+
+# --- 10. Machine ---------------------------------------------------------
+# quill:resolvesTo range completed to Person ∪ Organization ∪ Machine in §E
+# — this alone connects Machine via the already-existing two-hop path
+# File -quill:origin-> Origin -quill:resolvesTo-> Machine. Two new terms
+# below earn their place for the reasons stated on each.
+
+quill:onMachine a owl:ObjectProperty, owl:FunctionalProperty ;
+    rdfs:label "on machine" ;
+    rdfs:domain quill:File ;
+    rdfs:range quill:Machine ;
+    rdfs:comment """New quill: term — a materialized ONE-HOP shortcut for the
+        two-hop File -quill:origin-> Origin -quill:resolvesTo-> Machine path.
+        Justified specifically by CQ8 ("what's on the mac-studio backup
+        that isn't on the current machine") being a named, high-value
+        competency question, and because under mac-sync roots the
+        origin<->machine mapping is already 1:1-known at scan time — same
+        cost logic as quill:appearsIn: pay one extra triple once at ingest
+        to collapse a 2-hop join into one triple pattern at GraphRAG query
+        volumes. Functional: a File was scanned from exactly one machine's
+        subtree. Residual gap flagged, not fixed here: identifying "the
+        current machine" a query is running ON is an application-layer
+        hostname lookup, out of ontology scope.""" .
+
+quill:ownedBy a owl:ObjectProperty ;
+    rdfs:label "owned by" ;
+    rdfs:domain quill:Machine ;
+    rdfs:range quill:Person ;
+    rdfs:comment """New quill: term — no good flat external predicate fits;
+        schema:owns nests through schema:OwnershipInfo/schema:Product,
+        against the flattening principle already established for quill:Place
+        and pricing in this ontology (see the reuse-map note at the top of
+        this file).""" .
+
+# Considered and rejected: a direct CorpusRoot -> Machine edge. Wrong
+# cardinality — the shipped mac-sync root holds three machines' subtrees
+# (jon-snow, matts-mac-studio, workstation); Origin, not CorpusRoot, is the
+# correct machine-partition key, which is why the fix routes through
+# quill:resolvesTo instead.
+
+# --- 11. Topic -------------------------------------------------------
+# skos:broader/narrower locally scoped in §F (Quill loads skos: terms by
+# reference, not the full SKOS ontology as data, so nothing establishes
+# these facts unless restated here). Deliberately NOT declared
+# owl:TransitiveProperty — see §D, this matches SKOS's own canonical design
+# (skos:broaderTransitive is the transitive one; skos:broader is direct-only
+# by spec). Inbound aboutness closed by the same schema:about fix as
+# Document (§F) — one property serving three domains (Chunk, Document,
+# Photo -> Topic).
+
+
+# ------------------------------------------------------------
+# §B — INVERSE PROPERTIES
+# ------------------------------------------------------------
+# Declared only where (a) the reverse direction is a named entry point in a
+# competency question or the retrieval algorithm itself, AND (b) the writer
+# actually materializes both directions as physical triples — an undeclared
+# inverse costs nothing and gives nothing under Oxigraph (^property already
+# works in SPARQL with zero declaration), so a DECLARED inverse here is a
+# real write-time commitment, not a free annotation.
+
+quill:senderOf a owl:ObjectProperty ;
+    rdfs:label "sender of" ;
+    rdfs:domain quill:Identity ;
+    rdfs:range quill:Communication ;
+    owl:inverseOf schema:sender ;
+    rdfs:comment """Materialized inverse of schema:sender. CQ9's own named
+        traversal ("who have I emailed at Acme Corp?") starts from the
+        Identity/Person/Org side, not the Communication side — that's the
+        write-time commitment that earns this declaration. Path if
+        undeclared would be ^schema:sender; declared because the writer
+        physically writes both triples at graphify time.""" .
+
+quill:recipientOf a owl:ObjectProperty ;
+    rdfs:label "recipient of" ;
+    rdfs:domain quill:Identity ;
+    rdfs:range quill:Communication ;
+    owl:inverseOf schema:recipient ;
+    rdfs:comment "Materialized inverse of schema:recipient — same justification and same CQ9 traversal as quill:senderOf, opposite message direction." .
+
+quill:mentionedIn a owl:ObjectProperty ;
+    rdfs:label "mentioned in" ;
+    rdfs:domain [ a owl:Class ; owl:unionOf ( quill:Person quill:Organization quill:Topic quill:Project quill:Place quill:Album ) ] ;
+    rdfs:range quill:Chunk ;
+    owl:inverseOf quill:mentions ;
+    rdfs:comment """The single highest-value inverse in this ontology —
+        NOT a judgment call, externally confirmed: research-grounding.md's
+        writer literally emits (entity)-[:MENTIONED_IN]->(chunk) as its own
+        edge, and its bounded-hop expansion step queries FROM the entity
+        using that edge directly ("pull the MENTIONED_IN chunks of each
+        surviving expanded entity"). This is the retrieval algorithm's
+        literal wire format. Domain restated to match quill:mentions'
+        range exactly — see the keep-in-sync note on quill:mentions in
+        §E.""" .
+
+quill:topicOf a owl:ObjectProperty ;
+    rdfs:label "topic of" ;
+    rdfs:domain quill:Topic ;
+    rdfs:range [ a owl:Class ; owl:unionOf ( quill:Chunk quill:Document quill:Photo ) ] ;
+    owl:inverseOf schema:about ;
+    rdfs:comment "Materialized inverse of schema:about. Topic-centric expansion (\"everything about X\") is the other core traversal direction alongside mentions/mentionedIn — same class of retrieval value." .
+
+quill:hasDetection a owl:ObjectProperty ;
+    rdfs:label "has detection" ;
+    rdfs:domain quill:Photo ;
+    rdfs:range [ a owl:Class ; owl:unionOf ( quill:Face quill:OcrRegion ) ] ;
+    owl:inverseOf quill:detectedIn ;
+    rdfs:comment "Materialized inverse of quill:detectedIn — \"everything detected on this photo,\" mirroring detectedIn's own union domain with a union range on the way back." .
+
+quill:hasRelatedResource a owl:ObjectProperty ;
+    rdfs:label "has related resource" ;
+    rdfs:domain quill:Project ;
+    rdfs:range [ a owl:Class ; owl:unionOf ( quill:File quill:Communication quill:Task quill:Event ) ] ;
+    owl:inverseOf quill:relatesToProject ;
+    rdfs:comment "Materialized inverse of quill:relatesToProject — project-first expansion (\"everything on this project\"), serves CQ2 (\"what did I work on the week of...\") starting from the Project side." .
+
+quill:isDepictedInPhoto a owl:ObjectProperty ;
+    rdfs:label "is depicted in photo" ;
+    rdfs:domain quill:Person ;
+    rdfs:range quill:Photo ;
+    owl:inverseOf quill:appearsIn ;
+    rdfs:comment """Materialized inverse of quill:appearsIn. Naming note,
+        flagged rather than silently inherited: quill:appearsIn has
+        rdfs:domain quill:Photo ; rdfs:range quill:Person, so the triple
+        reads "the Photo appears in the Person" — grammatically backwards,
+        evidently ported as-is from PLAN.md's Neo4j APPEARS_IN edge where
+        direction and English grammar didn't have to agree. NOT renamed
+        here — it already ships in instance-data patterns and a rename is a
+        breaking change with no functional benefit — but given a
+        correctly-grammared inverse both for query ergonomics and to
+        document the oddity for future contributors.""" .
+
+# Explicitly NOT added, for selectivity in practice, not just principle:
+#   - a Face-level inverse of quill:depictsPerson: quill:appearsIn already
+#     covers the retrieval-relevant Person<-Photo direction at the right
+#     grain; "all Faces of this Person across every photo" is a
+#     re-clustering/QA tool need, not demonstrated by any CQ.
+#   - an inverse of quill:supersededBy: the "why do you believe this" claim
+#     queries always walk FORWARD from a known Claim; nothing asks "what
+#     superseded me" starting from the old claim.
+#   - individual inverses for quill:counterparty/quill:contractParty/
+#     quill:paidTo: they get the shared quill:involvedIn from §C instead.
+#     Minting counterpartyOf/contractPartyOf/paidToOf separately would be
+#     exactly the mechanical-inverse-for-every-property noise this design
+#     avoids.
+
+
+# ------------------------------------------------------------
+# §C — PROPERTY HIERARCHY
+# ------------------------------------------------------------
+# Two umbrellas, deliberately not merged into one quill:relatesTo:
+# quill:involves is structural participation (often deterministic — a From:
+# header, a calendar invite's attendee list); quill:mentions is textual/
+# extracted reference (near-always Claim-backed, §7's weaker evidentiary
+# tier). Collapsing them would erase a distinction the retrieval algorithm's
+# confidence-aware ranking needs at query time. quill:mentions has no
+# children — see its entry in §E; wrapping it in a subPropertyOf hierarchy
+# would collapse a UNION of *one*, which is padding, not structure.
+
+quill:involves a owl:ObjectProperty ;
+    rdfs:label "involves" ;
+    rdfs:domain owl:Thing ;
+    rdfs:range [ a owl:Class ; owl:unionOf ( quill:Person quill:Organization quill:Identity ) ] ;
+    rdfs:comment """Umbrella for structural-participation edges. Domain left
+        maximally general (owl:Thing) because quill:paidTo's subject is
+        itself an agent (Person/Organization paying another agent), which
+        breaks a narrower "record -> agent" framing — the same reasoning
+        that already forces quill:claimSubject/claimObject to stay general.
+        Range is Person ∪ Organization ∪ Identity, not just Person ∪
+        Organization: schema:sender/schema:recipient are children whose
+        range is Identity, and under RDFS semantics rdfs:subPropertyOf
+        propagates the parent's range to every child's values — excluding
+        Identity here would let a SHACL/reasoner built off this T-box
+        mistype Identity nodes as Person ∪ Organization.
+        DOUBLE-WRITE RULE, pinned to a depth: with the chain
+        carrier ⊑ issuer ⊑ counterparty ⊑ involves, writers materialize the
+        LEAF property + quill:involves (and its inverse) ONLY — exactly one
+        extra triple, always. Intermediate levels (issuer, counterparty) are
+        documentation/SHACL targets, not query APIs; a query wanting "any
+        issuer-like edge on financial docs" uses quill:involves directly
+        (or the concrete leaf), never a mid-tier property that was never
+        actually written redundantly. Direct extension of the same
+        write-amplification trade already established by quill:hasChunk/
+        prov:wasDerivedFrom and quill:appearsIn.""" .
+
+quill:involvedIn a owl:ObjectProperty ;
+    rdfs:label "involved in" ;
+    rdfs:domain [ a owl:Class ; owl:unionOf ( quill:Person quill:Organization quill:Identity ) ] ;
+    rdfs:range owl:Thing ;
+    owl:inverseOf quill:involves ;
+    rdfs:comment "Agent-first \"what does this Person/Org/Identity connect to\" — the whole point of the involves umbrella, materialized both ways per the double-write rule above." .
+
+# Existing/reused leaf properties folded under quill:involves. Each child's
+# range is a proper subset of {Person, Organization, Identity}, so this is
+# internally consistent with quill:involves' range per the comment above.
+quill:counterparty rdfs:subPropertyOf quill:involves .
+quill:issuer rdfs:subPropertyOf quill:counterparty .
+quill:contractParty rdfs:subPropertyOf quill:involves .
+quill:paidTo rdfs:subPropertyOf quill:involves .
+quill:assignee rdfs:subPropertyOf quill:involves .
+quill:depictsPerson rdfs:subPropertyOf quill:involves .
+quill:appearsIn rdfs:subPropertyOf quill:involves .
+schema:provider rdfs:subPropertyOf quill:involves .
+schema:customer rdfs:subPropertyOf quill:involves .
+schema:sender rdfs:subPropertyOf quill:involves .
+schema:recipient rdfs:subPropertyOf quill:involves .
+schema:attendee rdfs:subPropertyOf quill:involves .
+schema:organizer rdfs:subPropertyOf quill:involves .
+# quill:carrier already rdfs:subPropertyOf quill:issuer (declared where
+# quill:carrier itself is declared, §Financial/legal) — completing the
+# chain carrier ⊑ issuer ⊑ counterparty ⊑ involves without redeclaring it.
+
+# Why no third umbrella for quill:relatesToProject / schema:about: a
+# subPropertyOf hierarchy earns its keep by collapsing an N-way UNION of
+# differently-named predicates that converge on one relationship shape.
+# Project and Topic each have exactly ONE predicate pointing at them —
+# there's no UNION to collapse, so wrapping either in an umbrella would be
+# padding with no query it makes simpler.
+
+
+# ------------------------------------------------------------
+# §D — FORMAL CHARACTERISTICS
+# ------------------------------------------------------------
+# Reminder pinned here because it's the section most likely to be
+# misread: Oxigraph performs NO entailment. None of the FunctionalProperty
+# declarations below cause a write to be rejected or a value to be
+# deduplicated automatically — they document a genuine 0-or-1 cardinality
+# for SHACL / the visualizer / a future reasoner, and the writer is
+# independently responsible for honoring it.
+
+quill:root a owl:FunctionalProperty .
+quill:origin a owl:FunctionalProperty .
+quill:subsystem a owl:FunctionalProperty .
+quill:inFolder a owl:FunctionalProperty .
+quill:parentFolder a owl:FunctionalProperty .
+quill:resolvesTo a owl:FunctionalProperty .
+quill:identityOf a owl:FunctionalProperty ;
+    rdfs:comment "An Identity belongs to exactly one Person — equivalently, quill:hasIdentity is inverse-functional. Only this one direction is declared (not both): owl:inverseOf already makes the two directions encode the identical constraint, so double-declaring would be redundant, not additionally informative." .
+quill:depictsPerson a owl:FunctionalProperty ;
+    rdfs:comment "0-or-1: unclustered faces have none, which is still valid functional cardinality (absence, not a second value)." .
+quill:place a owl:FunctionalProperty .
+quill:issuer a owl:FunctionalProperty .
+quill:carrier a owl:FunctionalProperty ;
+    rdfs:comment "Restated separately from its parent quill:issuer for the same reason domain/range needed restating per subproperty in §C: Oxigraph doesn't entail characteristics down a subPropertyOf chain either." .
+
+# quill:onMachine's owl:FunctionalProperty typing is declared alongside its
+# definition in §A.10, not repeated here.
+
+# --- owl:TransitiveProperty: deliberately NONE declared -----------------
+# Applied consistently three times, stated once as a general rule:
+# whenever a property models a single IMMEDIATE step, don't declare it
+# transitive even when a same-named "eventually" relationship is also real
+# and useful — get the "eventually" relationship from a SPARQL property
+# path over the precise predicate, never by weakening the precise
+# predicate's own semantics. A false transitive declaration costs nothing
+# under Oxigraph's non-entailment today, but misleads a human reader or a
+# future OWL-DL/SHACL tool run against this file, which is bad hygiene a
+# T-box shouldn't ship.
+#   - quill:parentFolder models the immediate parent only; if A parentFolder
+#     B and B parentFolder C, A's parent is still B, not C. Ancestor folder:
+#     ?file quill:inFolder/quill:parentFolder* ?ancestorFolder .
+#   - skos:broader is, by SKOS's OWN canonical design, deliberately not
+#     transitive — skos:broaderTransitive is the formally transitive
+#     superproperty, precisely so "broader" chains don't silently collapse
+#     very-distant topics as if directly related. Not materializing
+#     skos:broaderTransitive separately (no writer need identified yet).
+#     Ancestor topic chain: ?topic skos:broader+ ?ancestorTopic .
+#   - quill:supersededBy models the immediate next revision only, which
+#     matters for §3's claim-audit fidelity (naming the exact chain, not
+#     just the endpoint). Current-version walk:
+#     ?claim quill:supersededBy* ?currentClaim .
+#     FILTER NOT EXISTS { ?currentClaim quill:supersededBy ?newer }
+
+# --- owl:SymmetricProperty: deliberately NONE declared -------------------
+# The obvious candidate — "these two Persons co-occur in the same
+# Photo/Meeting" — isn't modeled in this ontology and isn't being added
+# speculatively here: no competency question asks for it, and it isn't
+# free even if declared symmetric — Oxigraph still requires the writer to
+# physically write BOTH (A co-occurs B) and (B co-occurs A); a symmetric
+# declaration doesn't produce the reverse triple the way it might under a
+# reasoning store. Flagged as a Phase-2 candidate if a "who do I know in
+# common with X" query type emerges, not designed speculatively now.
+
+
+# ------------------------------------------------------------
+# §E — T-BOX COMPLETIONS (existing quill: properties, domain/range gaps)
+# ------------------------------------------------------------
+# The 14 properties audited as missing rdfs:domain and/or rdfs:range
+# (quill:mentions and quill:paidTo missing both). RDF is additive — none of
+# these triples contradict a range/domain already declared on the property
+# elsewhere in this file.
+
+quill:root rdfs:domain [ a owl:Class ; owl:unionOf ( quill:File quill:Folder quill:Photo ) ] .
+quill:origin rdfs:domain [ a owl:Class ; owl:unionOf ( quill:File quill:Folder quill:Photo quill:Chunk quill:Communication quill:Claim ) ] .
+quill:subsystem rdfs:domain [ a owl:Class ; owl:unionOf ( quill:File quill:Photo quill:Communication ) ] .
+quill:hasChunk rdfs:domain [ a owl:Class ; owl:unionOf ( quill:File quill:Photo quill:Communication ) ] ;
+    rdfs:comment "Domain extended to include Communication: a message body gets chunked/embedded exactly like a File's or Photo's extracted text (§6 grounding path is meant to be uniform) — without this a Communication's own text is unsearchable via the graph." .
+quill:relatesToProject rdfs:domain [ a owl:Class ; owl:unionOf ( quill:File quill:Communication quill:Task quill:Event ) ] ;
+    rdfs:comment "Supersedes the informal 'File ∪ Communication ∪ Task' domain note where quill:relatesToProject is first declared — Event added (CQ12)." .
+quill:issuer rdfs:domain [ a owl:Class ; owl:unionOf ( quill:Statement quill:Policy quill:TaxDocument ) ] ;
+    rdfs:comment "Supersedes the informal 'Statement ∪ Policy' domain note where quill:issuer is first declared — TaxDocument added." .
+quill:detectedIn rdfs:domain [ a owl:Class ; owl:unionOf ( quill:Face quill:OcrRegion ) ] .
+
+quill:resolvesTo rdfs:range [ a owl:Class ; owl:unionOf ( quill:Person quill:Organization quill:Machine ) ] .
+quill:counterparty rdfs:range [ a owl:Class ; owl:unionOf ( quill:Person quill:Organization ) ] .
+quill:contractParty rdfs:range [ a owl:Class ; owl:unionOf ( quill:Person quill:Organization ) ] .
+quill:claimSubject rdfs:range owl:Thing ;
+    rdfs:comment "Range deliberately maximally general, not enumerated — a generic reification predicate must accept any current or future class, exactly like rdf:subject's lack of range restriction in RDF reification. Enumerating would require perpetual maintenance and defeats the pattern's purpose." .
+quill:claimObject rdfs:range owl:Thing ;
+    rdfs:comment "As quill:claimSubject. ADDITIONALLY holds literal values in practice for datatype-valued claims — owl:ObjectProperty with literal instances is a deliberate, documented departure from strict OWL DL; Oxigraph doesn't enforce object-property range restrictions, and a clean DL split into claimObjectResource/claimObjectLiteral would double every Claim-writer's branch logic for a purity gain nobody needs. The looseness is noted in SHACL as sh:or(resource, literal), not modeled in OWL." .
+
+quill:mentions rdfs:domain quill:Chunk ;
+    rdfs:range [ a owl:Class ; owl:unionOf ( quill:Person quill:Organization quill:Topic quill:Project quill:Place quill:Album ) ] ;
+    rdfs:comment "Supersedes the informal 'range: any entity' note where quill:mentions is first declared, narrowing to exactly the classes flagged quill:isGroundedEntityType true. MUST be kept in sync with that annotation — owl:unionOf can't reference an annotation property, so this is two places to update, not one, if that set ever changes." .
+quill:paidTo rdfs:domain [ a owl:Class ; owl:unionOf ( quill:Person quill:Organization ) ] ;
+    rdfs:range [ a owl:Class ; owl:unionOf ( quill:Person quill:Organization ) ] .
+# quill:paidTo's rdfs:subPropertyOf quill:involves is declared in §C, not
+# repeated here, to avoid declaring the same triple twice in this file.
+
+
+# ------------------------------------------------------------
+# §F — REUSED-VOCABULARY DOMAIN/RANGE RESTATEMENT
+# ------------------------------------------------------------
+# quill.ttl's own reuse-map comment (top of file) lists these schema:/prov:/
+# skos:/dcterms: properties as reused "wherever schema.org's property is
+# already FLAT" — but until now none of them had a local rdfs:domain/
+# rdfs:range in this file, only prose. Since Quill loads only quill.ttl as
+# data (not the full external ontologies), no T-box-only tool could see
+# these connections exist. This single class of fix resolves more of the
+# 11 named orphans (Communication, Invoice, Meeting's attendee/organizer,
+# Event's location/dates, Document/Topic's aboutness) than any new
+# quill:-namespace property minted in this pass. Each restriction below is
+# a LOCAL, application-profile assertion, not a claim about schema.org's/
+# PROV-O's/SKOS's own canonical (unconstrained or differently-ranged)
+# domain and range.
+
+schema:sender a owl:ObjectProperty ;
+    rdfs:domain quill:Communication ;
+    rdfs:range quill:Identity ;
+    rdfs:comment """Points at Identity, deliberately NOT Person: a From:
+        header is parsed deterministically at graphify time (no LLM call),
+        but the Person behind it may not be resolved yet (resolve stage,
+        Claim-backed, can lag or be wrong) — exactly the known/resolved
+        split quill:Origin -quill:resolvesTo-> Person already uses.
+        Serves CQ3/CQ9: Communication -schema:sender-> Identity
+        -quill:identityOf-> Person -schema:worksFor-> Organization.
+        Demo-data note: ontology-design.md §5 / instances/demo.trig
+        currently point schema:sender at a qid:person-* node; that instance
+        data needs to move to a qid:identity-* node to stay consistent with
+        this design (not fixed in this T-box pass).""" .
+schema:recipient a owl:ObjectProperty ;
+    rdfs:domain quill:Communication ;
+    rdfs:range quill:Identity ;
+    rdfs:comment "As schema:sender above — same known/resolved rationale, opposite message direction." .
+schema:dateSent a owl:DatatypeProperty ;
+    rdfs:domain quill:Communication ;
+    rdfs:range xsd:dateTime .
+schema:messageAttachment a owl:ObjectProperty ;
+    rdfs:domain quill:Communication ;
+    rdfs:range quill:File ;
+    rdfs:comment "Closes CQ3's second half (\"where's the source file?\"): Communication -schema:messageAttachment-> File -quill:path-> string." .
+schema:attendee a owl:ObjectProperty ;
+    rdfs:domain quill:Meeting ;
+    rdfs:range quill:Person .
+schema:organizer a owl:ObjectProperty ;
+    rdfs:domain quill:Event ;
+    rdfs:range [ a owl:Class ; owl:unionOf ( quill:Person quill:Organization ) ] ;
+    rdfs:comment "Domain is Event (broader than Meeting) — Meeting inherits it via the materialized full-type-chain rule (a Meeting instance is also typed Event)." .
+schema:location a owl:ObjectProperty ;
+    rdfs:domain quill:Event ;
+    rdfs:range quill:Place .
+schema:startDate a owl:DatatypeProperty ;
+    rdfs:domain quill:Event ;
+    rdfs:range xsd:date .
+schema:endDate a owl:DatatypeProperty ;
+    rdfs:domain quill:Event ;
+    rdfs:range xsd:date .
+schema:about a owl:ObjectProperty ;
+    rdfs:domain [ a owl:Class ; owl:unionOf ( quill:Chunk quill:Document quill:Photo ) ] ;
+    rdfs:range quill:Topic ;
+    rdfs:comment "One property closing both Document's and Topic's orphan status: Chunk/Document/Photo -schema:about-> Topic." .
+schema:worksFor a owl:ObjectProperty ;
+    rdfs:domain quill:Person ;
+    rdfs:range quill:Organization ;
+    rdfs:comment "Serves CQ9/CQ11. Also usable, at any confidence, via the Claim reification path (quill:claimSubject/claimPredicate=schema:worksFor/claimObject) when not yet materialized directly — see §3." .
+schema:provider a owl:ObjectProperty ;
+    rdfs:domain quill:Invoice ;
+    rdfs:range quill:Organization .
+schema:customer a owl:ObjectProperty ;
+    rdfs:domain quill:Invoice ;
+    rdfs:range [ a owl:Class ; owl:unionOf ( quill:Person quill:Organization ) ] .
+quill:totalAmountDue a owl:DatatypeProperty ;
+    rdfs:label "total amount due" ;
+    rdfs:domain quill:Invoice ;
+    rdfs:range xsd:decimal ;
+    rdfs:comment """Flat scalar, deliberately NOT schema:totalPaymentDue, whose
+        canonical range is a nested schema:PriceSpecification resource. Reusing that
+        IRI with an xsd:decimal range would contradict schema.org's own semantics —
+        the same reason quill:placeCity/Region/Country exist instead of a nested
+        schema:PostalAddress. Currency travels in quill:currency.""" .
+schema:paymentDueDate a owl:DatatypeProperty ;
+    rdfs:domain quill:Invoice ;
+    rdfs:range xsd:date .
+dc11:creator a owl:DatatypeProperty ;
+    rdfs:domain quill:Document ;
+    rdfs:range xsd:string ;
+    rdfs:comment """Literal-valued, deterministic: the raw creator-name
+        string pulled from a file's own container metadata (§7 "extract"
+        stage, no LLM call). Deliberately dc11: (Dublin Core Elements 1.1,
+        http://purl.org/dc/elements/1.1/), NOT dcterms: — DCMI formally
+        declares dcterms:creator rdfs:range dcterms:Agent, so asserting a
+        literal range on dcterms:creator would contradict its own canonical
+        formal range, exactly the reuse mistake Hard Constraint 3 forbids.
+        dc11: is DCMI's own sanctioned literal-valued sibling for precisely
+        this situation (dcterms deliberately tightened dc11's properties to
+        resource-valued when DCMI split the two namespaces).""" .
+dcterms:creator a owl:ObjectProperty ;
+    rdfs:domain quill:Document ;
+    rdfs:range [ a owl:Class ; owl:unionOf ( quill:Person quill:Organization ) ] ;
+    rdfs:comment "Resource-valued, per DCMI's own formal range (dcterms:Agent) — owl:ObjectProperty is a compatible local tightening of DCMI's rdf:Property typing, not a contradiction, since every local value is a resource. Asserted only once dc11:creator's raw string is resolved to an actual Person/Organization node — identity resolution or an LLM Claim, per §7. Until resolved, only dc11:creator holds." .
+
+prov:wasGeneratedBy a owl:ObjectProperty ;
+    rdfs:range quill:PipelineRun ;
+    rdfs:comment """Domain deliberately left at PROV-O's own canonical
+        prov:Entity rather than a hand-enumerated owl:unionOf of every
+        Quill class that uses it — a 10+-class union would be brittle and
+        go stale every time a class is added. Range is sharpened to
+        quill:PipelineRun because that IS the Quill-specific fact worth
+        stating locally: quill:runId bridges to Postgres ingest_log.run_id.
+        Known pre-existing looseness, not introduced by this pass: the
+        shipped A-box also puts prov:wasGeneratedBy on Person/Organization/
+        Identity instances, which are prov:Agent, not prov:Entity — agents
+        don't formally "get generated" by activities in core PROV-O. Out of
+        scope to correct here.""" .
+prov:used a owl:ObjectProperty ;
+    rdfs:domain quill:PipelineRun .
+prov:wasAssociatedWith a owl:ObjectProperty ;
+    rdfs:domain quill:PipelineRun .
+# prov:actedOnBehalfOf (prov:Agent -> prov:Agent, delegation) deliberately
+# NOT restated here: no competency question or PipelineRun traversal needs
+# it, and PROV-O's own canonical domain/range already cover any future use
+# without a local restatement — restating it now would be exactly the kind
+# of restatement-for-completeness padding this pass avoids elsewhere.
+
+skos:broader a owl:ObjectProperty ;
+    rdfs:domain quill:Topic ;
+    rdfs:range quill:Topic .
+skos:narrower a owl:ObjectProperty ;
+    rdfs:domain quill:Topic ;
+    rdfs:range quill:Topic ;
+    owl:inverseOf skos:broader ;
+    rdfs:comment "Restating SKOS's own canonical inverse pair locally — Quill loads skos: terms by reference, not the full SKOS ontology as data, so nothing establishes this fact for a T-box-only tool unless restated here." .
+
+
+# ------------------------------------------------------------
+# §G — CQ12: Photo -> Event/Project, and Project's temporal extent
+# ------------------------------------------------------------
+# Added after adversarial review found CQ12 still unanswerable: no property
+# touched both Photo and {Event, Project}. Answering it by FILTER-joining
+# quill:takenAt (xsd:dateTime) against schema:startDate (xsd:date) is not a
+# graph traversal and the two ranges do not coerce natively. So the overlap is
+# computed ONCE at ingest and materialized as a real edge.
+
+quill:duringEvent a owl:ObjectProperty ;
+    rdfs:label "during event" ;
+    rdfs:domain quill:Photo ;
+    rdfs:range quill:Event ;
+    rdfs:subPropertyOf quill:involves ;
+    rdfs:comment """Materialized at ingest by comparing quill:takenAt against the
+        Event's temporal extent — computed once per photo, not per query. This is
+        what makes CQ12 a traversal instead of a cross-type literal FILTER.
+        CQ12: ?photo quill:duringEvent/quill:relatesToProject ?project""" .
+
+quill:projectStartDate a owl:DatatypeProperty ;
+    rdfs:label "project start date" ;
+    rdfs:domain quill:Project ;
+    rdfs:range xsd:date ;
+    rdfs:comment "Temporal extent of a Project. Project previously had no properties of its own." .
+
+quill:projectEndDate a owl:DatatypeProperty ;
+    rdfs:label "project end date" ;
+    rdfs:domain quill:Project ;
+    rdfs:range xsd:date ;
+    rdfs:comment "Open-ended when absent — an active project." .
+
+quill:projectParticipant a owl:ObjectProperty ;
+    rdfs:label "project participant" ;
+    rdfs:domain quill:Project ;
+    rdfs:range foaf:Person ;
+    rdfs:subPropertyOf quill:involvesAgent ;
+    rdfs:comment "Who worked on it. Feeds the people facet in the search UI." .
+
+# ------------------------------------------------------------
+# §H — Topic aboutness via dcterms:subject
+# ------------------------------------------------------------
+# Topic was the one class with genuinely no path to anything. dcterms:subject
+# is the idiomatic term and its conventional range is skos:Concept, which
+# quill:Topic already subclasses — so no new term needs minting.
+
+dcterms:subject rdfs:subPropertyOf quill:aboutEntity ;
+    rdfs:comment """Document/Chunk -> Topic. Reused rather than minting
+        quill:hasTopic: dcterms:subject is idiomatic, and its conventional
+        skos:Concept range already fits quill:Topic.""" .
+
+# ------------------------------------------------------------
+# §I — Corrections to existing declarations
+# ------------------------------------------------------------
+
+quill:contentHash rdfs:comment """SHA-256 of the file bytes.
+
+    DO NOT declare this owl:InverseFunctionalProperty. Two distinct quill:File
+    nodes sharing a contentHash is the CORRECT and expected state — it is how
+    the same document on a laptop backup and on a live drive are recognised as
+    duplicates. IFP semantics would license collapsing them into one node via
+    owl:sameAs, destroying exactly the finding CQ8 asks for ("what is on the
+    mac-studio backup that is not on the current machine"). Duplicate detection
+    belongs in a computed quill:duplicateOf edge, not in an ontological
+    identity constraint.""" .
+
+quill:hasIdentity rdfs:domain prov:Agent ;
+    rdfs:comment """Widened from Person to prov:Agent. The class comment always
+        promised "an alias for a Person or Organization", and both already
+        subclass prov:Agent — organizations have domains and shared phone
+        numbers needing the same alias mechanism. No union class required.""" .
+
+quill:identityOf rdfs:range prov:Agent .

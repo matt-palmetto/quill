@@ -1,0 +1,52 @@
+@prefix sh:    <http://www.w3.org/ns/shacl#> .
+@prefix quill: <https://quill.example.com/ontology#> .
+@prefix prov:  <http://www.w3.org/ns/prov#> .
+@prefix xsd:   <http://www.w3.org/2001/XMLSchema#> .
+
+# --- Every Claim must carry source + activity + timestamp + confidence ---
+quill:ClaimProvenanceShape a sh:NodeShape ;
+    sh:targetClass quill:Claim ;
+    sh:property [ sh:path prov:wasDerivedFrom ; sh:minCount 1 ;
+        sh:message "Claim has no prov:wasDerivedFrom — no source chunk/entity linked." ] ;
+    sh:property [ sh:path prov:wasGeneratedBy ; sh:minCount 1 ; sh:maxCount 1 ; sh:class quill:PipelineRun ;
+        sh:message "Claim has no prov:wasGeneratedBy pointing to a quill:PipelineRun." ] ;
+    sh:property [ sh:path prov:generatedAtTime ; sh:minCount 1 ; sh:maxCount 1 ; sh:datatype xsd:dateTime ;
+        sh:message "Claim has no prov:generatedAtTime (or it isn't an xsd:dateTime)." ] ;
+    sh:property [ sh:path quill:confidence ; sh:minCount 1 ; sh:datatype xsd:decimal ;
+        sh:minInclusive 0.0 ; sh:maxInclusive 1.0 ;
+        sh:message "Claim is missing quill:confidence or it is outside [0,1]." ] ;
+    sh:property [ sh:path quill:claimSubject ; sh:minCount 1 ; sh:maxCount 1 ] ;
+    sh:property [ sh:path quill:claimPredicate ; sh:minCount 1 ; sh:maxCount 1 ] ;
+    sh:property [ sh:path quill:claimObject ; sh:minCount 1 ; sh:maxCount 1 ] .
+
+# --- Every File must carry the CONTRACT.md non-negotiable provenance triple ---
+quill:FileProvenanceShape a sh:NodeShape ;
+    sh:targetClass quill:File ;
+    sh:property [ sh:path quill:path ; sh:minCount 1 ; sh:maxCount 1 ; sh:datatype xsd:string ] ;
+    sh:property [ sh:path quill:contentHash ; sh:minCount 1 ; sh:maxCount 1 ] ;
+    sh:property [ sh:path quill:root ; sh:minCount 1 ; sh:maxCount 1 ; sh:class quill:CorpusRoot ] ;
+    sh:property [ sh:path quill:origin ; sh:minCount 1 ; sh:class quill:Origin ;
+        sh:message "File missing quill:origin — violates the CONTRACT.md provenance rule." ] ;
+    sh:property [ sh:path quill:subsystem ; sh:minCount 1 ; sh:class quill:IngestSubsystem ] .
+
+# --- Every Chunk must be actually grounded (never a dangling, unembedded chunk) ---
+quill:ChunkGroundingShape a sh:NodeShape ;
+    sh:targetClass quill:Chunk ;
+    sh:property [ sh:path quill:qdrantPointId ; sh:minCount 1 ; sh:maxCount 1 ;
+        sh:message "Chunk has no quill:qdrantPointId — it exists in the KG but is not grounded to a vector." ] ;
+    sh:property [ sh:path prov:wasDerivedFrom ; sh:minCount 1 ] .
+
+# --- Every Photo must carry Immich provenance ---
+quill:PhotoProvenanceShape a sh:NodeShape ;
+    sh:targetClass quill:Photo ;
+    sh:property [ sh:path quill:immichAssetId ; sh:minCount 1 ; sh:maxCount 1 ] ;
+    sh:property [ sh:path quill:origin ; sh:minCount 1 ] ;
+    sh:property [ sh:path quill:subsystem ; sh:minCount 1 ; sh:hasValue quill:sys-immich ] ;
+    sh:property [ sh:path prov:wasGeneratedBy ; sh:minCount 1 ; sh:class quill:PipelineRun ] .
+
+# --- Identity cardinality + closed vocabulary ---
+quill:IdentityShape a sh:NodeShape ;
+    sh:targetClass quill:Identity ;
+    sh:property [ sh:path quill:identityValue ; sh:minCount 1 ; sh:maxCount 1 ] ;
+    sh:property [ sh:path quill:identityType ; sh:minCount 1 ; sh:maxCount 1 ;
+        sh:in ( "email" "phone" "git-author" "immich-person" "device-hostname" "username" ) ] .

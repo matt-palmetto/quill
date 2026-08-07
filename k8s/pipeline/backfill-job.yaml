@@ -1,0 +1,125 @@
+# One-shot BACKFILL job — NOT in kustomization.yaml. Apply manually while a
+# large pending queue exists; delete when it reports done. Coexists safely
+# with the 30-min cron: queue claims are atomic (FOR UPDATE SKIP LOCKED),
+# and QUILL_SKIP_SCAN=1 leaves discovery to the cron.
+#
+#   kubectl apply -f k8s/pipeline/backfill-job.yaml
+#   kubectl -n quill logs -f job/quill-backfill | grep progress
+#   kubectl -n quill delete job quill-backfill    # when queue is drained
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: quill-backfill
+  namespace: quill
+  labels:
+    app: quill-ingest   # inherits the ingest NetworkPolicies
+    app.kubernetes.io/part-of: quill
+    app.kubernetes.io/component: pipeline
+spec:
+  backoffLimit: 3
+  template:
+    metadata:
+      labels:
+        app: quill-ingest
+        app.kubernetes.io/part-of: quill
+        app.kubernetes.io/component: pipeline
+    spec:
+      automountServiceAccountToken: false
+      restartPolicy: OnFailure
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: backfill
+          image: REGISTRY_HOST:5000/quill/pipeline:dev  # pinned via `kubectl set image` at apply time; see header
+          imagePullPolicy: IfNotPresent
+          command: ["node", "src/run.mjs", "ingest"]
+          env:
+            - name: QUILL_SKIP_SCAN
+              value: "1"
+            - name: QUILL_INGEST_BUDGET_SECONDS
+              value: "604800"   # a week; the job exits early when the queue drains
+            - name: QUILL_INDEX_CONCURRENCY
+              value: "24"
+            # Global cap on in-flight embed batches (embeddings.mjs) — the
+            # real throughput bound is the CPU embed fleet, not file count.
+            - name: QUILL_EMBED_CONCURRENCY
+              value: "6"
+            - name: QUILL_EMBED_TIMEOUT_MS
+              value: "180000"
+            - name: QUILL_PG_URL
+              valueFrom: {secretKeyRef: {name: quill-pg-app, key: uri}}
+            - name: QUILL_QDRANT_URL
+              value: http://quill-qdrant:6333
+            - name: QUILL_QDRANT_API_KEY
+              valueFrom: {secretKeyRef: {name: quill-qdrant-auth, key: QDRANT_API_KEY}}
+            - name: QUILL_MEILI_URL
+              value: http://quill-meili:7700
+            - name: QUILL_MEILI_KEY
+              valueFrom: {secretKeyRef: {name: quill-meili-auth, key: MEILI_MASTER_KEY}}
+            - name: QUILL_EMBED_URL
+              value: https://api.voyageai.com/v1
+            - name: QUILL_EMBED_MODEL
+              value: voyage-4-large
+            - name: QUILL_EMBED_MODEL_REVISION
+              value: voyage-4-large-2026-08
+            - name: QUILL_EMBED_INPUT_TYPE
+              value: document
+            - name: QUILL_EMBED_API_KEY
+              valueFrom: {secretKeyRef: {name: quill-embed-auth, key: QUILL_EMBED_API_KEY}}
+            - name: QUILL_EMBED_BATCH
+              value: "64"
+            - name: QUILL_EXTRACT_URL
+              value: http://quill-extract:9000
+            - name: QUILL_STATE_DIR
+              value: /tmp/state
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            # Corpus mounts MUST match the cron's (CONTRACT.md): the first
+            # backfill attempt shipped without them and ENOENT'd 6,978 queue
+            # rows in under a minute (2026-08-06).
+            - name: corpus-cloud-drives
+              mountPath: /corpus/cloud-drives
+              readOnly: true
+            - name: corpus-archives
+              mountPath: /corpus/archives
+              readOnly: true
+            - name: corpus-mac-sync
+              mountPath: /corpus/mac-sync
+              readOnly: true
+            - name: corpus-git-mirrors
+              mountPath: /corpus/git-mirrors
+              readOnly: true
+            - name: corpus-inbox
+              mountPath: /corpus/inbox
+              readOnly: true
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: "2"
+              memory: 2Gi
+            limits:
+              cpu: "16"
+              memory: 8Gi
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: 1Gi
+        - name: corpus-cloud-drives
+          nfs: {server: NAS_IP, path: /mnt/storage/cloud-drives, readOnly: true}
+        - name: corpus-archives
+          nfs: {server: NAS_IP, path: /mnt/storage/archives, readOnly: true}
+        - name: corpus-mac-sync
+          nfs: {server: NAS_IP, path: /mnt/storage/mac-sync, readOnly: true}
+        - name: corpus-git-mirrors
+          nfs: {server: NAS_IP, path: /mnt/storage/system/git-mirrors, readOnly: true}
+        - name: corpus-inbox
+          nfs: {server: NAS_IP, path: /mnt/storage/backups/inbox, readOnly: true}

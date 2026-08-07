@@ -1,0 +1,17 @@
+{
+  "name": "quill-pipeline",
+  "version": "1.0.0",
+  "description": "Quill Phase 1 ingest pipeline: scan corpus roots, extract text, index into Meilisearch + Qdrant.",
+  "type": "module",
+  "private": true,
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "start": "node src/run.mjs ingest",
+    "test": "node --test"
+  },
+  "dependencies": {
+    "pg": "^8.13.1"
+  }
+}

@@ -1,0 +1,120 @@
+# Fastify search API (CONTRACT.md `quill-api`): GET /search, /ops, /healthz,
+# /readyz. Merges Meili (keyword) + embed->Qdrant (semantic) results.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: quill-api
+  namespace: quill
+  labels:
+    app: quill-api
+    app.kubernetes.io/part-of: quill
+    app.kubernetes.io/component: api
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: quill-api
+  template:
+    metadata:
+      labels:
+        app: quill-api
+        app.kubernetes.io/part-of: quill
+        app.kubernetes.io/component: api
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: api
+          # Tag placeholder; digest-pin before prod.
+          image: REGISTRY_HOST:5000/quill/api:dev
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          env:
+            - name: PORT
+              value: "8080"
+            - name: QUILL_PG_URL
+              valueFrom:
+                secretKeyRef:
+                  name: quill-pg-app
+                  key: uri
+            - name: QUILL_QDRANT_URL
+              value: http://quill-qdrant:6333
+            - name: QUILL_QDRANT_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: quill-qdrant-auth
+                  key: QDRANT_API_KEY
+            - name: QUILL_MEILI_URL
+              value: http://quill-meili:7700
+            - name: QUILL_MEILI_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: quill-meili-auth
+                  key: MEILI_MASTER_KEY
+            - name: QUILL_EMBED_URL
+              value: https://api.voyageai.com/v1
+            - name: QUILL_EMBED_MODEL
+              value: voyage-4-large
+            - name: QUILL_EMBED_INPUT_TYPE_QUERY
+              value: query
+            - name: QUILL_EMBED_API_KEY
+              valueFrom: {secretKeyRef: {name: quill-embed-auth, key: QUILL_EMBED_API_KEY}}
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 20
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: 256Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: quill-api
+  namespace: quill
+  labels:
+    app: quill-api
+    app.kubernetes.io/part-of: quill
+    app.kubernetes.io/component: api
+spec:
+  type: ClusterIP
+  selector:
+    app: quill-api
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+      protocol: TCP

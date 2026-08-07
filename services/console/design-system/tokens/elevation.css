@@ -1,0 +1,45 @@
+/* ============================================================
+   ELEVATION — Quill by Example Org
+   On warm ink, depth comes from hairline oyster rings plus deep
+   warm-black shadows; the page never goes pure black. A brick
+   glow is reserved for brand/active emphasis.
+   ============================================================ */
+:root {
+  /* hairline ring used alone on flat cards */
+  --shadow-hairline: 0 0 0 1px rgba(242, 235, 218, 0.08);
+
+  --shadow-xs: 0 1px 2px rgba(8, 6, 4, 0.4);
+  --shadow-sm: 0 1px 3px rgba(8, 6, 4, 0.45), 0 1px 2px rgba(8, 6, 4, 0.3);
+  --shadow-md: 0 4px 14px rgba(8, 6, 4, 0.5), 0 2px 4px rgba(8, 6, 4, 0.3);
+  --shadow-lg: 0 12px 32px rgba(8, 6, 4, 0.55), 0 4px 8px rgba(8, 6, 4, 0.35);
+  --shadow-xl: 0 24px 60px rgba(8, 6, 4, 0.6), 0 8px 16px rgba(8, 6, 4, 0.4);
+
+  /* card default = hairline + soft lift */
+  --shadow-card: 0 0 0 1px rgba(242, 235, 218, 0.07), 0 1px 3px rgba(8, 6, 4, 0.35);
+
+  /* focus ring (sunset coral) */
+  --focus-ring-shadow: 0 0 0 3px rgba(227, 122, 92, 0.35);
+
+  /* brick emphasis glow for active/brand elements */
+  --shadow-brand-glow: 0 6px 20px rgba(184, 90, 63, 0.35);
+
+  /* inset for sunken inputs */
+  --shadow-inset: inset 0 1px 2px rgba(8, 6, 4, 0.35);
+}
+
+/* light theme — soft shadows over oyster paper */
+:root[data-theme="light"] {
+  --shadow-hairline: 0 0 0 1px rgba(38, 32, 22, 0.07);
+
+  --shadow-xs: 0 1px 2px rgba(38, 32, 22, 0.06);
+  --shadow-sm: 0 1px 3px rgba(38, 32, 22, 0.09), 0 1px 2px rgba(38, 32, 22, 0.05);
+  --shadow-md: 0 4px 12px rgba(38, 32, 22, 0.09), 0 2px 4px rgba(38, 32, 22, 0.05);
+  --shadow-lg: 0 12px 28px rgba(38, 32, 22, 0.13), 0 4px 8px rgba(38, 32, 22, 0.06);
+  --shadow-xl: 0 24px 56px rgba(38, 32, 22, 0.17), 0 8px 16px rgba(38, 32, 22, 0.07);
+
+  --shadow-card: 0 0 0 1px rgba(38, 32, 22, 0.05), 0 1px 3px rgba(38, 32, 22, 0.07);
+
+  --focus-ring-shadow: 0 0 0 3px rgba(184, 90, 63, 0.3);
+  --shadow-brand-glow: 0 6px 20px rgba(184, 90, 63, 0.3);
+  --shadow-inset: inset 0 1px 2px rgba(38, 32, 22, 0.07);
+}

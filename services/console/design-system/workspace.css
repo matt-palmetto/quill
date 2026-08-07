@@ -1,0 +1,240 @@
+/* ============================================================
+   Quill Workspace shell — app-frame styles for the console.
+   Charleston dark editorial: an ink sidebar with the feather
+   lockup and grouped, labeled navigation; a slim top bar carrying
+   page context on the left and operator tooling on the right;
+   a warm-ink canvas. Consumes design-system tokens from
+   ../styles.css. The sidebar stays ink in BOTH themes — it is the
+   brand anchor.
+   ============================================================ */
+
+* { box-sizing: border-box; }
+html, body { height: 100%; }
+body { margin: 0; background: var(--surface-page); color: var(--text-primary);
+  font-family: var(--font-sans); -webkit-font-smoothing: antialiased; }
+#root { height: 100%; }
+button { font-family: inherit; }
+
+/* ---------- Shell ---------- */
+.gw-shell { display: grid; grid-template-columns: var(--sidebar-width) minmax(0, 1fr); height: 100%; }
+.gw-main { display: flex; flex-direction: column; min-width: 0; height: 100%; }
+
+/* ---------- Sidebar ---------- */
+.az-side {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow-y: auto;
+  background: var(--shell-bg);
+  border-right: 1px solid var(--shell-border);
+}
+.az-side__brand {
+  display: flex;
+  align-items: center;
+  flex: none;
+  min-height: 64px;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--shell-border);
+  text-decoration: none;
+}
+.az-side__nav {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  padding: 6px 12px 18px;
+}
+.az-side__group { padding-top: 18px; }
+.az-side__group-label {
+  display: block;
+  padding: 0 10px 7px;
+  color: rgba(242, 235, 218, 0.38);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: var(--tracking-eyebrow);
+  line-height: 1;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.az-side__item {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 34px;
+  margin-bottom: 2px;
+  padding: 0 10px;
+  border-radius: var(--radius-md);
+  color: rgba(242, 235, 218, 0.62);
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: 0.005em;
+  text-decoration: none;
+  white-space: nowrap;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+.az-side__item svg {
+  width: 16px;
+  height: 16px;
+  flex: none;
+  opacity: 0.85;
+}
+.az-side__item::before {
+  content: "";
+  position: absolute;
+  left: -12px;
+  top: 50%;
+  width: 2px;
+  height: 18px;
+  border-radius: 0 2px 2px 0;
+  background: transparent;
+  transform: translateY(-50%);
+}
+.az-side__item:hover {
+  color: var(--paper-500, #f2ebda);
+  background: rgba(242, 235, 218, 0.05);
+}
+.az-side__item.is-active {
+  color: var(--paper-500, #f2ebda);
+  background: var(--quill-gold-soft, rgba(201, 162, 39, 0.14));
+}
+.az-side__item.is-active::before { background: var(--quill-gold, #c9a227); }
+.az-side__item.is-active svg { opacity: 1; color: var(--quill-gold, #c9a227); }
+.az-side__item:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -2px;
+}
+.az-side__foot {
+  flex: none;
+  margin-top: auto;
+  padding: 12px 14px;
+  border-top: 1px solid var(--shell-border);
+}
+
+/* viewer identity chip (sidebar footer) */
+.az-viewer {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+.az-viewer__status {
+  width: 7px;
+  height: 7px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--moss-300, #a9b383);
+  box-shadow: 0 0 0 3px rgba(143, 160, 107, 0.18);
+}
+.az-viewer__identity {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+.az-viewer__email {
+  overflow: hidden;
+  color: rgba(242, 235, 218, 0.88);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.2;
+  letter-spacing: var(--tracking-mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.az-viewer__role {
+  color: rgba(242, 235, 218, 0.42);
+  font-family: var(--font-mono);
+  font-size: 9px;
+  line-height: 1.15;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.az-viewer--anon {
+  color: rgba(242, 235, 218, 0.42);
+  font-size: 11px;
+}
+
+/* ---------- Top bar (slim) ---------- */
+.gw-top {
+  height: var(--topbar-height);
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  min-width: 0;
+  padding: 0 14px 0 20px;
+  border-bottom: 1px solid var(--border-subtle);
+  background: var(--surface-page);
+}
+.gw-top__left {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  min-width: 0;
+  flex: 1;
+}
+.gw-top__right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: none;
+}
+
+/* page context (left side of the top bar) */
+.az-context {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+.az-context__eyebrow {
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: var(--tracking-eyebrow);
+  line-height: 1;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.az-context__title {
+  overflow: hidden;
+  color: var(--text-primary);
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  line-height: 1.1;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ---------- Canvas ---------- */
+.gw-canvas { flex: 1; overflow: auto; }
+
+/* ---------- Responsive: collapse the sidebar to an icon rail ---------- */
+@media (max-width: 1020px) {
+  .gw-shell { grid-template-columns: var(--sidebar-width-rail) minmax(0, 1fr); }
+  .az-side__brand { justify-content: center; padding: 14px 8px; }
+  .az-side__brand .fc-brand__lockup { display: none; }
+  .az-side__nav { padding: 6px 10px 14px; align-items: stretch; }
+  .az-side__group-label {
+    padding: 0 0 7px;
+    overflow: hidden;
+    text-align: center;
+    letter-spacing: 0;
+  }
+  .az-side__item { justify-content: center; padding: 0; gap: 0; }
+  .az-side__item span { display: none; }
+  .az-side__item::before { left: -10px; }
+  .az-side__foot { padding: 12px 8px; display: flex; justify-content: center; }
+  .az-viewer__identity, .az-viewer--anon span { display: none; }
+  .az-viewer--anon { font-size: 0; }
+  .az-context__eyebrow { display: none; }
+}
+
+@media (max-width: 760px) {
+  .gw-top { padding: 0 10px 0 14px; }
+}

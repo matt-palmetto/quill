@@ -1,0 +1,86 @@
+# Dedicated cloudflared connector for quill.example.com. Forked from the
+# azalea pattern (platform/infra/cluster-node/cloudflared.yaml) — token-based run:
+# the tunnel id + secret are encoded in TUNNEL_TOKEN, and the ingress rule
+# (quill.example.com -> http://quill-console.quill.svc.cluster.local:80)
+# lives in Cloudflare (remotely-managed config), not in this manifest.
+#
+# Prerequisites (out-of-band, NOT in git):
+#   - Secret `quill-cloudflared` (ns quill), key `TUNNEL_TOKEN`
+#   - A dedicated tunnel for this connector (do not reuse the shared
+#     Meridian7 `cluster-node` tunnel or the azalea `azalea-cluster-node` tunnel — those
+#     are on different Cloudflare accounts/zones than example.com's quill
+#     hostname routing needs)
+#   - DNS CNAME quill.example.com -> <tunnel-id>.cfargotunnel.com (proxied)
+#   - Cloudflare Tunnel ingress rule: quill.example.com ->
+#     http://quill-console.quill.svc.cluster.local:80
+#   - A Cloudflare Access app fronting quill.example.com (team SSO), same
+#     model as azalea-console — this manifest does not create it.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: quill-cloudflared
+  namespace: quill
+  labels:
+    app: quill-cloudflared
+    app.kubernetes.io/part-of: quill
+    app.kubernetes.io/component: cloudflared
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: quill-cloudflared
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app: quill-cloudflared
+        app.kubernetes.io/part-of: quill
+        app.kubernetes.io/component: cloudflared
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: cloudflared
+          image: cloudflare/cloudflared:2025.10.0
+          imagePullPolicy: IfNotPresent
+          # Token-based run: tunnel id + secret are encoded in TUNNEL_TOKEN;
+          # ingress config is fetched from Cloudflare (remotely-managed).
+          args:
+            - tunnel
+            - --no-autoupdate
+            - --metrics
+            - 0.0.0.0:2000
+            - run
+          env:
+            - name: TUNNEL_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: quill-cloudflared
+                  key: TUNNEL_TOKEN
+          livenessProbe:
+            httpGet:
+              path: /ready
+              port: 2000
+            initialDelaySeconds: 10
+            periodSeconds: 30
+          # No readOnlyRootFilesystem/capability-drop here: mirroring the
+          # exact proven azalea container spec (cloudflared.yaml) rather
+          # than adding untested hardening — cloudflared writes local state
+          # under its home directory even in token mode.
+          securityContext:
+            allowPrivilegeEscalation: false
+          resources:
+            requests:
+              cpu: 25m
+              memory: 64Mi
+            limits:
+              cpu: 250m
+              memory: 256Mi

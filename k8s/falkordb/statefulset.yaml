@@ -1,0 +1,115 @@
+# FalkorDB, standalone, single tenant. Graph `quill` is reserved but unused
+# until Phase 2 (CONTRACT.md). Forked from the proven pattern on this exact
+# cluster: m7-sales/k8s/brain/statefulset.yaml (cluster-node, single k3s node,
+# `local-path`/`nvme-tier0` storage classes only, no GKE nodepool selector,
+# no Helm).
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: quill-falkordb
+  namespace: quill
+  labels:
+    app: quill-falkordb
+    app.kubernetes.io/part-of: quill
+    app.kubernetes.io/component: graph
+spec:
+  serviceName: quill-falkordb
+  replicas: 1
+  selector:
+    matchLabels:
+      app: quill-falkordb
+  template:
+    metadata:
+      labels:
+        app: quill-falkordb
+        app.kubernetes.io/part-of: quill
+        app.kubernetes.io/component: graph
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 999
+        runAsGroup: 999
+        fsGroup: 999
+        seccompProfile:
+          type: RuntimeDefault
+      volumes:
+        - name: falkordb-auth-config
+          secret:
+            # Materialized out-of-band (see kustomization.yaml header) — never
+            # committed here. Key: redis.conf (contains `requirepass <password>`).
+            secretName: quill-falkordb-auth
+            items:
+              - key: redis.conf
+                path: redis.conf
+      containers:
+        - name: falkordb
+          # Pinned to the exact tag+digest already proven on gtm-brain. Never :latest.
+          image: falkordb/falkordb:v4.18.7@sha256:e93fcd753fe612fb0a222166a0620a1ae31b826a12f223c3b6d06038d9d7a364
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: false
+            capabilities:
+              drop: ["ALL"]
+          ports:
+            - name: redis
+              containerPort: 6379
+              protocol: TCP
+          env:
+            - name: BROWSER
+              value: "0"
+            - name: REDIS_ARGS
+              value: "/etc/falkordb/redis.conf --appendonly yes"
+          readinessProbe:
+            tcpSocket:
+              port: redis
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket:
+              port: redis
+            initialDelaySeconds: 30
+            periodSeconds: 30
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: "2"
+              memory: 4Gi
+          volumeMounts:
+            - name: falkordb-data
+              mountPath: /var/lib/falkordb/data
+            - name: falkordb-auth-config
+              mountPath: /etc/falkordb/
+              readOnly: true
+  volumeClaimTemplates:
+    - metadata:
+        name: falkordb-data
+      spec:
+        accessModes:
+          - ReadWriteOnce
+        storageClassName: nvme-tier0
+        resources:
+          requests:
+            storage: 20Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: quill-falkordb
+  namespace: quill
+  labels:
+    app: quill-falkordb
+    app.kubernetes.io/part-of: quill
+    app.kubernetes.io/component: graph
+spec:
+  type: ClusterIP
+  selector:
+    app: quill-falkordb
+  ports:
+    - name: redis
+      port: 6379
+      targetPort: redis
+      protocol: TCP

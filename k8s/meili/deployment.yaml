@@ -1,0 +1,146 @@
+# Meilisearch: the one net-new store in Quill's stack (DECISIONS.md D6 —
+# nothing else on the cluster serves <150ms typo-tolerant keyword search).
+# Index `quill_files` is created idempotently by the pipeline (CONTRACT.md).
+#
+# The upstream image has no non-root USER (verified against the v1.16.0
+# Dockerfile 2026-08-06: alpine:3.20 base, no USER directive, WORKDIR
+# /meili_data). Run as an arbitrary non-root uid with fsGroup so the
+# kubelet chowns the PVC mount to a writable group — same technique CNPG and
+# other root-defaulting images need on this cluster.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: quill-meili
+  namespace: quill
+  labels:
+    app: quill-meili
+    app.kubernetes.io/part-of: quill
+    app.kubernetes.io/component: search
+spec:
+  replicas: 1
+  # The data dir is RWO. Never overlap two pods that mount it.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: quill-meili
+  template:
+    metadata:
+      labels:
+        app: quill-meili
+        app.kubernetes.io/part-of: quill
+        app.kubernetes.io/component: search
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        fsGroupChangePolicy: OnRootMismatch
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: meilisearch
+          # v1.16.0 multi-arch manifest-list digest, resolved from Docker Hub
+          # 2026-08-06 (tags API: getmeili/meilisearch, name "v1.16").
+          # TODO(release): re-pin once the image is mirrored to the local
+          # registry at push time.
+          image: getmeili/meilisearch:v1.16@sha256:c0c45cb82a96221d7c855d1cc36ca04ff4b3ce6330fbd8df5ba82e86e632a053
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          ports:
+            - name: http
+              containerPort: 7700
+              protocol: TCP
+          env:
+            - name: MEILI_ENV
+              value: production
+            - name: MEILI_MAX_INDEXING_MEMORY
+              value: "2 GiB"
+            - name: MEILI_MAX_INDEXING_THREADS
+              value: "4"
+            - name: MEILI_NO_ANALYTICS
+              value: "true"
+            - name: MEILI_MASTER_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: quill-meili-auth
+                  key: MEILI_MASTER_KEY
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 20
+            timeoutSeconds: 5
+          resources:
+            requests:
+              cpu: 500m
+              memory: 2Gi
+            limits:
+              cpu: "4"
+              # First-index bursts OOMKilled the pod at 4Gi (observed
+              # 2026-08-06, 262k-file backfill). Meili mmaps LMDB and its
+              # indexer spikes; 12Gi + the explicit indexing cap below keep
+              # it bounded on this 192Gi node.
+              memory: 12Gi
+          volumeMounts:
+            - name: meili-data
+              mountPath: /meili_data
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: meili-data
+          persistentVolumeClaim:
+            claimName: quill-meili-data
+        - name: tmp
+          emptyDir:
+            sizeLimit: 512Mi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: quill-meili-data
+  namespace: quill
+  labels:
+    app: quill-meili
+    app.kubernetes.io/part-of: quill
+    app.kubernetes.io/component: search
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: local-path
+  resources:
+    requests:
+      storage: 100Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: quill-meili
+  namespace: quill
+  labels:
+    app: quill-meili
+    app.kubernetes.io/part-of: quill
+    app.kubernetes.io/component: search
+spec:
+  type: ClusterIP
+  selector:
+    app: quill-meili
+  ports:
+    - name: http
+      port: 7700
+      targetPort: http
+      protocol: TCP

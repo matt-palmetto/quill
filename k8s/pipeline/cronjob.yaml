@@ -1,0 +1,222 @@
+# Quill ingest: scan -> extract -> normalize -> index over the four NFS
+# corpus mounts (CONTRACT.md). Every 30 minutes, UTC.
+#
+# Image tag is a placeholder (`:dev`). Digest-pin before prod, same
+# convention as gtm-brain (never `:latest`, never a floating tag once
+# released — see m7-sales/k8s/brain/ingest-cronjob.yaml header).
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: quill-ingest
+  namespace: quill
+  labels:
+    app: quill-ingest
+    app.kubernetes.io/part-of: quill
+    app.kubernetes.io/component: pipeline
+spec:
+  schedule: "*/30 * * * *"
+  timeZone: UTC
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 1
+  jobTemplate:
+    metadata:
+      labels:
+        app: quill-ingest
+        app.kubernetes.io/part-of: quill
+        app.kubernetes.io/component: pipeline
+    spec:
+      backoffLimit: 1
+      activeDeadlineSeconds: 1700
+      ttlSecondsAfterFinished: 86400
+      template:
+        metadata:
+          labels:
+            app: quill-ingest
+            app.kubernetes.io/part-of: quill
+            app.kubernetes.io/component: pipeline
+        spec:
+          automountServiceAccountToken: false
+          restartPolicy: Never
+          terminationGracePeriodSeconds: 30
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 10001
+            runAsGroup: 10001
+            fsGroup: 10001
+            fsGroupChangePolicy: OnRootMismatch
+            seccompProfile:
+              type: RuntimeDefault
+          initContainers:
+            # A fresh pod's first egress can race NetworkPolicy programming
+            # on this cluster (m7-sales/k8s/brain/sync-cronjob.yaml race
+            # note: three consecutive canary pods died on their first
+            # connect at ~25ms). Wait for the Postgres datapath before the
+            # ingest's first connect.
+            - name: wait-datapath
+              image: REGISTRY_HOST:5000/quill/pipeline:dev
+              command:
+                - node
+                - --input-type=module
+                - -e
+                - |
+                  import net from 'node:net';
+                  const tryOnce = () => new Promise((res) => {
+                    const s = net.createConnection({ host: 'quill-pg-rw', port: 5432, timeout: 2000 }, () => { s.destroy(); res(true); });
+                    s.on('error', () => { s.destroy(); res(false); });
+                    s.on('timeout', () => { s.destroy(); res(false); });
+                  });
+                  let ok = false;
+                  for (let i = 0; i < 30 && !ok; i++) { ok = await tryOnce(); if (!ok) await new Promise(r => setTimeout(r, 1000)); }
+                  process.exit(ok ? 0 : 1);
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: ["ALL"]
+              resources:
+                requests:
+                  cpu: 50m
+                  memory: 64Mi
+                limits:
+                  cpu: 250m
+                  memory: 128Mi
+          containers:
+            - name: ingest
+              image: REGISTRY_HOST:5000/quill/pipeline:dev
+              imagePullPolicy: IfNotPresent
+              command:
+                - node
+                - src/run.mjs
+                - ingest
+              env:
+                - name: QUILL_PG_URL
+                  valueFrom:
+                    secretKeyRef:
+                      name: quill-pg-app
+                      key: uri
+                - name: QUILL_QDRANT_URL
+                  value: http://quill-qdrant:6333
+                - name: QUILL_QDRANT_API_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: quill-qdrant-auth
+                      key: QDRANT_API_KEY
+                - name: QUILL_MEILI_URL
+                  value: http://quill-meili:7700
+                - name: QUILL_MEILI_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: quill-meili-auth
+                      key: MEILI_MASTER_KEY
+                - name: QUILL_EMBED_URL
+                  value: https://api.voyageai.com/v1
+                - name: QUILL_EMBED_MODEL
+                  value: voyage-4-large
+                - name: QUILL_EMBED_MODEL_REVISION
+                  value: voyage-4-large-2026-08
+                - name: QUILL_EMBED_INPUT_TYPE
+                  value: document
+                - name: QUILL_EMBED_API_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: quill-embed-auth
+                      key: QUILL_EMBED_API_KEY
+                - name: QUILL_EMBED_BATCH
+                  value: "64"
+                - name: QUILL_EXTRACT_URL
+                  value: http://quill-extract:9000
+                - name: QUILL_STATE_DIR
+                  value: /data
+                - name: QUILL_INGEST_BUDGET_SECONDS
+                  value: "1500"
+                - name: QUILL_INDEX_CONCURRENCY
+                  value: "24"
+                - name: QUILL_EMBED_CONCURRENCY
+                  value: "3"
+                - name: QUILL_EMBED_TIMEOUT_MS
+                  value: "180000"
+              volumeMounts:
+                - name: state
+                  mountPath: /data
+                - name: tmp
+                  mountPath: /tmp
+                - name: corpus-cloud-drives
+                  mountPath: /corpus/cloud-drives
+                  readOnly: true
+                - name: corpus-archives
+                  mountPath: /corpus/archives
+                  readOnly: true
+                - name: corpus-mac-sync
+                  mountPath: /corpus/mac-sync
+                  readOnly: true
+                - name: corpus-git-mirrors
+                  mountPath: /corpus/git-mirrors
+                  readOnly: true
+                - name: corpus-inbox
+                  mountPath: /corpus/inbox
+                  readOnly: true
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: ["ALL"]
+              resources:
+                requests:
+                  cpu: 500m
+                  memory: 1Gi
+                limits:
+                  cpu: "8"
+                  memory: 4Gi
+          volumes:
+            - name: state
+              persistentVolumeClaim:
+                claimName: quill-ingest-state
+            - name: tmp
+              emptyDir:
+                sizeLimit: 512Mi
+            # All four corpus mounts are NFS from NAS_IP (CONTRACT.md),
+            # in-tree `nfs:` volumes, all read-only.
+            - name: corpus-cloud-drives
+              nfs:
+                server: NAS_IP
+                path: /mnt/storage/cloud-drives
+                readOnly: true
+            - name: corpus-archives
+              nfs:
+                server: NAS_IP
+                path: /mnt/storage/archives
+                readOnly: true
+            - name: corpus-mac-sync
+              nfs:
+                server: NAS_IP
+                path: /mnt/storage/mac-sync
+                readOnly: true
+            - name: corpus-git-mirrors
+              nfs:
+                server: NAS_IP
+                path: /mnt/storage/system/git-mirrors
+                readOnly: true
+            - name: corpus-inbox
+              nfs:
+                server: NAS_IP
+                path: /mnt/storage/backups/inbox
+                readOnly: true
+---
+# Durable scan/index watermark state for the 30-minute ingest.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: quill-ingest-state
+  namespace: quill
+  labels:
+    app: quill-ingest
+    app.kubernetes.io/part-of: quill
+    app.kubernetes.io/component: pipeline
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: local-path
+  resources:
+    requests:
+      storage: 5Gi

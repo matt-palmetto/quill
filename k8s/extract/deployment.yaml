@@ -1,0 +1,112 @@
+# docling extraction worker (CONTRACT.md `quill-extract`): POST /extract
+# (raw bytes, headers x-filename/content-type) -> {text, pages, truncated}.
+# Only reachable from the pipeline CronJob pods (networkpolicies.yaml).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: quill-extract
+  namespace: quill
+  labels:
+    app: quill-extract
+    app.kubernetes.io/part-of: quill
+    app.kubernetes.io/component: extract
+spec:
+  replicas: 16
+  selector:
+    matchLabels:
+      app: quill-extract
+  template:
+    metadata:
+      labels:
+        app: quill-extract
+        app.kubernetes.io/part-of: quill
+        app.kubernetes.io/component: extract
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: extract
+          # Tag placeholder; digest-pin before prod.
+          image: REGISTRY_HOST:5000/quill/extract:dev
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: QUILL_EXTRACT_THREADS
+              value: "6"
+            - name: OMP_NUM_THREADS
+              value: "6"
+            - name: MKL_NUM_THREADS
+              value: "6"
+          ports:
+            - name: http
+              containerPort: 9000
+              protocol: TCP
+          # Model load takes tens of seconds; conversions are long and CPU
+          # bound. Generous startup + tolerant liveness so a slow document
+          # never looks like a hung process.
+          startupProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 10
+            failureThreshold: 30
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 60
+            periodSeconds: 30
+            timeoutSeconds: 10
+            failureThreshold: 6
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: "2"
+              memory: 2Gi
+            limits:
+              cpu: "16"
+              # docling holds 1.4 GB of models per process plus per-document
+              # page rasters; 8Gi was tight under concurrent PDFs.
+              memory: 12Gi
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: 1Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: quill-extract
+  namespace: quill
+  labels:
+    app: quill-extract
+    app.kubernetes.io/part-of: quill
+    app.kubernetes.io/component: extract
+spec:
+  type: ClusterIP
+  selector:
+    app: quill-extract
+  ports:
+    - name: http
+      port: 9000
+      targetPort: http
+      protocol: TCP

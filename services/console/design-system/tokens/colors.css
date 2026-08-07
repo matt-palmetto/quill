@@ -1,0 +1,209 @@
+/* ============================================================
+   COLORS — Quill by Example Org
+   "Charleston dark editorial." The console is DARK-MODE-FIRST:
+   :root carries the warm-ink dark theme; [data-theme="light"]
+   derives an oyster-paper light theme from the same family.
+
+   Forked from azalea/platform/fleet-console's design system
+   (DECISIONS.md 2026-08-06, D9): the Charleston primitives and
+   semantic aliases are the shared pattern. The legacy
+   violet/lime/blue/magenta rename-compat block from the
+   pre-rebrand azalea system is NOT carried over — this is a new
+   product, nothing references those names. The identity accent
+   (azalea's blossom ramp) is replaced with Quill's feather-gold.
+
+   Primitives (from example-org.com):
+     ink      #14110D / #1C1814 / #26211B / #322C24  (warm near-blacks)
+     paper    #F2EBDA (+ rgba tints for muted text / hairlines)
+     brick    #B85A3F  primary action / active
+     coral    #E37A5C  sparing highlights / attention
+     indigo   #2C5F7A  links / info
+     moss     #7C8466  success
+     bronze   #8B6F3F  warning
+     feather-gold  #C9A227 (dark) / #8F7118 (light)  Quill's identity hue
+   ============================================================ */
+:root {
+  color-scheme: dark;
+
+  /* ---- Charleston ink / paper primitives ---- */
+  --ink-950: #14110d;   /* page */
+  --ink-900: #1c1814;   /* card */
+  --ink-800: #26211b;   /* raised */
+  --ink-700: #322c24;   /* highest surface */
+  --paper-500: #f2ebda; /* primary text on ink */
+  --paper-tint-72: rgba(242, 235, 218, 0.72);
+  --paper-tint-55: rgba(242, 235, 218, 0.55);
+  --paper-tint-32: rgba(242, 235, 218, 0.32);
+  --paper-tint-18: rgba(242, 235, 218, 0.18);
+  --paper-tint-10: rgba(242, 235, 218, 0.10);
+
+  /* ---- Accents ---- */
+  --brick-600: #9c4a31;
+  --brick-500: #b85a3f;  /* primary action */
+  --brick-400: #c96b4f;  /* hover */
+  --coral-400: #e37a5c;  /* highlight, sparingly */
+  --indigo-600: #24506a;
+  --indigo-500: #2c5f7a;
+  --indigo-300: #7fb2cc; /* link text on ink */
+  --moss-500:  #7c8466;
+  --moss-300:  #a9b383;
+  --bronze-500: #8b6f3f;
+  --bronze-300: #c9a55c;
+
+  /* ---- Quill feather-gold (identity hue) ---- */
+  --quill-gold: #c9a227;              /* PRIMARY identity accent — dark theme */
+  --quill-gold-soft: rgba(201, 162, 39, 0.14); /* tinted hover/active surface */
+
+  /* gradient brand — brick into coral, warm Lowcountry dusk */
+  --gradient-brand: linear-gradient(135deg, var(--brick-500) 0%, var(--coral-400) 100%);
+
+  /* ============================================================
+     SEMANTIC ALIASES — reach for these in product code
+     ============================================================ */
+
+  /* text */
+  --text-primary:    var(--paper-500);
+  --text-secondary:  var(--paper-tint-72);
+  --text-muted:      var(--paper-tint-55);
+  --text-on-brand:   #fcf7ec;
+  --text-link:       var(--indigo-300);
+  --text-link-hover: #a5cce0;
+
+  /* surfaces */
+  --surface-page:         var(--ink-950);
+  --surface-card:         var(--ink-900);
+  --surface-raised:       var(--ink-800);
+  --surface-sunken:       #100e0b;
+  --surface-brand:        var(--brick-500);
+  --surface-brand-strong: var(--brick-600);
+  --surface-brand-subtle: #362527;
+  --surface-hover:        #221d17;
+  --surface-selected:     #362a29;
+
+  /* borders — oyster hairlines */
+  --border-subtle:  var(--paper-tint-10);
+  --border-default: var(--paper-tint-18);
+  --border-strong:  var(--paper-tint-32);
+  --border-brand:   var(--brick-500);
+
+  /* interactive */
+  --action-primary:        var(--brick-500);
+  --action-primary-hover:  var(--brick-400);
+  --action-primary-active: var(--brick-600);
+  --focus-ring:            var(--coral-400);
+
+  /* status */
+  --success-surface: #222a1c;
+  --success-text:    #b4bd97;
+  --success-solid:   #8fa06b;
+
+  --warning-surface: #302818;
+  --warning-text:    #e0c583;
+  --warning-solid:   #c9a55c;
+
+  --error-surface:   #33201a;
+  --error-text:      #eca68f;
+  --error-solid:     #d96a4c;
+
+  --info-surface:    #1b2a33;
+  --info-text:       #8fbad3;
+
+  /* neutral scale (warm, inverted for ink) */
+  --neutral-900: #f2ebda;
+  --neutral-800: #e4dcc8;
+  --neutral-700: #cfc6b2;
+  --neutral-600: #b0a794;
+  --neutral-500: #948b75;
+  --neutral-400: #7e7666;
+  --neutral-300: #635c4f;
+  --neutral-250: #4a443a;
+  --neutral-200: #3e382f;
+  --neutral-150: #362f27;
+  --neutral-100: #2a241d;
+  --neutral-50:  #201b15;
+
+  /* shell */
+  --shell-bg:     #110f0b;
+  --shell-border: var(--paper-tint-10);
+}
+
+/* ============================================================
+   LIGHT — oyster paper, derived from the same family.
+   An explicit saved preference only; dark is the default brand
+   experience.
+   ============================================================ */
+:root[data-theme="light"] {
+  color-scheme: light;
+
+  --paper-tint-72: rgba(38, 32, 22, 0.72);
+  --paper-tint-55: rgba(38, 32, 22, 0.55);
+  --paper-tint-32: rgba(38, 32, 22, 0.30);
+  --paper-tint-18: rgba(38, 32, 22, 0.16);
+  --paper-tint-10: rgba(38, 32, 22, 0.09);
+
+  --quill-gold: #8f7118;
+  --quill-gold-soft: rgba(143, 113, 24, 0.12);
+
+  --neutral-900: #262016;
+  --neutral-800: #3f3829;
+  --neutral-700: #4a4335;
+  --neutral-600: #57503f;
+  --neutral-500: #6f6753;
+  --neutral-400: #8a8170;
+  --neutral-300: #b3a88e;
+  --neutral-250: #bfb397;
+  --neutral-200: #cfc3a6;
+  --neutral-150: #d9cfb6;
+  --neutral-100: #efe8d5;
+  --neutral-50:  #f5f0e3;
+
+  --success-surface: #e4e8d4;
+  --success-text:    #4b5531;
+  --success-solid:   #6b7449;
+
+  --warning-surface: #f1e5c0;
+  --warning-text:    #6e5722;
+  --warning-solid:   #a8853f;
+
+  --error-surface:   #f5dfd5;
+  --error-text:      #93361e;
+  --error-solid:     #b85a3f;
+
+  --info-surface:    #dce7ee;
+  --info-text:       #24506a;
+
+  /* text */
+  --text-primary:    #262016;
+  --text-secondary:  #57503f;
+  --text-muted:      #8a8170;
+  --text-on-brand:   #fcf7ec;
+  --text-link:       #2c5f7a;
+  --text-link-hover: #24506a;
+
+  /* surfaces */
+  --surface-page:         #f4eedf;
+  --surface-card:         #fcf9f0;
+  --surface-raised:       #fcf9f0;
+  --surface-sunken:       #ede5d1;
+  --surface-brand:        #b85a3f;
+  --surface-brand-strong: #9c4a31;
+  --surface-brand-subtle: #f5e0e0;
+  --surface-hover:        #f0e9d8;
+  --surface-selected:     #f5e0e0;
+
+  /* borders */
+  --border-subtle:  #e7dfcb;
+  --border-default: #d9cfb6;
+  --border-strong:  #bfb397;
+  --border-brand:   #b85a3f;
+
+  /* interactive */
+  --action-primary:        #b85a3f;
+  --action-primary-hover:  #c96b4f;
+  --action-primary-active: #9c4a31;
+  --focus-ring:            #b85a3f;
+
+  /* shell — stays ink in both themes, the brand anchor */
+  --shell-bg:     #1c1814;
+  --shell-border: rgba(242, 235, 218, 0.10);
+}

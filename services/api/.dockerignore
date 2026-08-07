@@ -1,0 +1,11 @@
+node_modules
+dist
+.git
+npm-debug.log
+Dockerfile
+.dockerignore
+*.test.ts
+test
+.env
+.env.*
+!.env.example

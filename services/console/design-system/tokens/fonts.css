@@ -1,0 +1,13 @@
+/* ============================================================
+   FONTS — Quill by Example Org
+   The console is self-hosted and CSP-locked: NO external font
+   fetches. The brand families are declared as font stacks that
+   resolve to IBM Plex when present on the host and degrade to
+   high-quality system faces otherwise:
+     · IBM Plex Sans  — UI (buttons, labels, body)
+     · IBM Plex Serif — display / brand lockup / page titles
+     · IBM Plex Mono  — figures, eyebrows, run IDs, code
+   Stacks live in tokens/typography.css (--font-sans /
+   --font-display / --font-mono). This file intentionally loads
+   nothing over the network.
+   ============================================================ */

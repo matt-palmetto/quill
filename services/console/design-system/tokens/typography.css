@@ -1,0 +1,67 @@
+/* ============================================================
+   TYPOGRAPHY — Quill by Example Org
+   Charleston dark editorial: IBM Plex Sans carries the UI,
+   IBM Plex Serif carries display/brand moments, IBM Plex Mono
+   carries data, eyebrows, and identifiers. No webfont fetches —
+   stacks fall back to system faces.
+   ============================================================ */
+:root {
+  /* ---- Families ---- */
+  --font-display: "IBM Plex Serif", "Iowan Old Style", Georgia, "Times New Roman", serif; /* display, brand lockup, page titles */
+  --font-sans:    "IBM Plex Sans", -apple-system, "Segoe UI", "Helvetica Neue", Arial, sans-serif; /* default UI */
+  --font-body:    "IBM Plex Sans", -apple-system, "Segoe UI", "Helvetica Neue", Arial, sans-serif; /* long-form copy */
+  --font-mono:    "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace; /* figures, eyebrows, code */
+
+  /* ---- Weights ---- */
+  --weight-regular:  400;
+  --weight-medium:   500;
+  --weight-semibold: 600;
+  --weight-bold:     700;
+
+  /* ---- Marketing / display scale ---- */
+  --text-display: 4rem;     /* 64px — hero          line-height 1.1 */
+  --text-h1:      3rem;     /* 48px                 line-height 1.2 */
+  --text-h2:      2rem;     /* 32px                 line-height 1.2 */
+  --text-h3:      1.5rem;   /* 24px                 line-height 1.4 */
+  --text-h4:      1.25rem;  /* 20px                 line-height 1.5 */
+  --text-h5:      1rem;     /* 16px                 line-height 1.5 */
+
+  /* ---- Product / UI text scale ---- */
+  --text-xl:   1.25rem;   /* 20px */
+  --text-lg:   1.125rem;  /* 18px */
+  --text-md:   1rem;      /* 16px — base body */
+  --text-sm:   0.875rem;  /* 14px — dense UI, table cells */
+  --text-xs:   0.75rem;   /* 12px — labels, captions */
+  --text-2xs:  0.6875rem; /* 11px — eyebrows, micro-labels */
+
+  /* ---- Line heights ---- */
+  --leading-tight:   1.1;
+  --leading-snug:    1.2;
+  --leading-normal:  1.4;
+  --leading-relaxed: 1.5;
+  --leading-loose:   1.65;
+
+  /* ---- Letter spacing ---- */
+  --tracking-tight:  -0.02em;  /* large display */
+  --tracking-snug:   -0.01em;  /* headings */
+  --tracking-normal: 0;
+  --tracking-wide:   0.04em;   /* uppercase labels */
+  --tracking-eyebrow: 0.14em;  /* 11px mono eyebrows */
+  --tracking-mono:   -0.01em;  /* tabular figures */
+}
+
+/* tabular figures helper for numeric data — apply to numeric cells */
+.quill-tnum {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: var(--tracking-mono);
+}
+
+/* eyebrow helper — 11px mono, uppercase, wide tracked */
+.quill-eyebrow {
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-medium);
+  letter-spacing: var(--tracking-eyebrow);
+  text-transform: uppercase;
+}

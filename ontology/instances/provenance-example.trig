@@ -1,0 +1,24 @@
+@prefix quill: <https://quill.example.com/ontology#> .
+@prefix qid:   <https://quill.example.com/id/> .
+@prefix prov:  <http://www.w3.org/ns/prov#> .
+@prefix xsd:   <http://www.w3.org/2001/XMLSchema#> .
+@prefix schema: <https://schema.org/> .
+
+GRAPH qid:run-20260807031244-enrich {
+    qid:run-20260807031244-enrich a quill:PipelineRun ;
+        quill:runId "20260807031244-enrich" ; quill:stage "enrich" ;
+        prov:startedAtTime "2026-08-07T03:12:44Z"^^xsd:dateTime ;
+        prov:endedAtTime   "2026-08-07T03:12:59Z"^^xsd:dateTime ;
+        prov:wasAssociatedWith qid:agent-quill-pipeline .
+
+    qid:claim-7d4e91 a quill:Claim ;
+        quill:claimSubject qid:person-jordan-reyes ;
+        quill:claimPredicate schema:worksFor ;
+        quill:claimObject qid:org-acme-corp ;
+        quill:confidence "0.88"^^xsd:decimal ;
+        quill:validFrom "2024-01-01"^^xsd:date ;
+        quill:materialized false ;
+        prov:wasGeneratedBy qid:run-20260807031244-enrich ;
+        prov:wasDerivedFrom qid:chunk-9f3a2c ;
+        prov:generatedAtTime "2026-08-07T03:12:51Z"^^xsd:dateTime .
+}
