@@ -124,7 +124,7 @@ test('a file under an excluded top-level directory (cloud-drives/sarah) is never
   const tree = {
     matt: { 'notes.md': 'hello world' },
     sarah: { 'secret.md': 'must never be read' },
-    example-org: { 'plan.txt': 'the plan' },
+    'example-org': { 'plan.txt': 'the plan' },
   };
   const openedPaths = [];
   const fsImpl = buildMockFsImpl(tree, corpusRoot, openedPaths);
