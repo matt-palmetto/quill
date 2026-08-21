@@ -49,6 +49,11 @@ function fsErrorMessage(err) {
   return TRANSIENT_FS_CODES.has(err?.code) ? `NFS error: ${err.code}` : String(err?.message ?? err);
 }
 
+/** Only a vanished directory is a completed walk; NFS/IO failures must retry. */
+export function readdirFailureCompletesWalk(err) {
+  return err?.code === 'ENOENT' || err?.code === 'ENOTDIR';
+}
+
 async function processFile({ root, absPath, relSegments, db, fsImpl, runId, counters }) {
   const origin = deriveOrigin(root, relSegments);
   const ext = extname(absPath);
@@ -85,12 +90,24 @@ async function processFile({ root, absPath, relSegments, db, fsImpl, runId, coun
     return;
   }
 
-  const unchanged = existing
-    && existing.status !== 'deleted'
+  const sameFingerprint = existing
     && Number(existing.size) === Number(stats.size)
     && new Date(existing.mtime).getTime() === stats.mtime.getTime();
-  if (unchanged) {
+  // error/deleted are not "done": a transient extract/embed failure or a
+  // false deletion (NFS blip) must be retried, not treated as unchanged.
+  if (sameFingerprint && existing.status !== 'deleted' && existing.status !== 'error') {
     await db.touchFileSeen(absPath, stats.mtime);
+    return;
+  }
+  if (sameFingerprint && existing.status === 'error' && existing.content_hash) {
+    await db.upsertPending({
+      path: absPath, root: root.name, origin, size: Number(stats.size),
+      mtime: stats.mtime, contentHash: existing.content_hash,
+    });
+    await db.insertIngestLog({
+      runId, stage: 'scan', path: absPath, detail: { status: 'pending', retried_error: true },
+    });
+    counters.changed += 1;
     return;
   }
 
@@ -107,6 +124,18 @@ async function processFile({ root, absPath, relSegments, db, fsImpl, runId, coun
   }
 
   if (existing && existing.content_hash === contentHash) {
+    if (existing.status === 'deleted' || existing.status === 'error') {
+      await db.upsertPending({
+        path: absPath, root: root.name, origin, size: Number(stats.size),
+        mtime: stats.mtime, contentHash,
+      });
+      await db.insertIngestLog({
+        runId, stage: 'scan', path: absPath,
+        detail: { status: 'pending', restored: existing.status },
+      });
+      counters.changed += 1;
+      return;
+    }
     await db.touchFileSeen(absPath, stats.mtime);
     return;
   }
@@ -126,7 +155,10 @@ async function walkDir({ root, absDirPath, relSegments, db, fsImpl, budget, runI
     entries = await fsImpl.readdir(absDirPath, { withFileTypes: true });
   } catch (err) {
     logWarn('scan: readdir failed', { path: absDirPath, code: err?.code, error: fsErrorMessage(err) });
-    return { completed: true };
+    // Treating ESTALE/EIO as "walk finished" marks every unseen file under
+    // this directory deleted when the pass later completes. Only a missing
+    // directory is a real completion.
+    return { completed: readdirFailureCompletesWalk(err) };
   }
 
   for (const entry of sortByName(entries)) {

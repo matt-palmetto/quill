@@ -80,7 +80,16 @@ export function createDb(connectionString = process.env.QUILL_PG_URL) {
   /** File observed with unchanged (mtime,size): just bump last_seen, clear any deleted_at. */
   async function touchFileSeen(path, mtime) {
     await pool.query(
-      `UPDATE file_state SET last_seen = now(), mtime = $2, deleted_at = NULL WHERE path = $1`,
+      `UPDATE file_state SET
+         last_seen = now(),
+         mtime = $2,
+         deleted_at = NULL,
+         status = CASE
+           WHEN status = 'deleted' AND indexed_at IS NOT NULL THEN 'indexed'
+           WHEN status = 'deleted' THEN 'pending'
+           ELSE status
+         END
+       WHERE path = $1`,
       [path, mtime],
     );
   }

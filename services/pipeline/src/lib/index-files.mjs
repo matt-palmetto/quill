@@ -30,10 +30,8 @@ export async function indexFile(file, { db, runId, meili, qdrant, embedClient, e
       title, ext, mtimeUnix, size: Number(file.size), text: extracted.text,
     });
 
-    // Re-indexing changed content: drop this path's stale points before writing new ones.
-    await qdrant.deleteByPath(file.path);
-
     const embedThisFile = shouldEmbed(file.path, embedPolicy);
+    let points = [];
     if (embedThisFile && extracted.text && extracted.text.trim().length > 0) {
       const chunks = chunkDocument({ rawText: extracted.text, sourcePath: file.path })
         // Minified/single-line blobs can put >64KiB in one "500-token" chunk
@@ -46,7 +44,7 @@ export async function indexFile(file, { db, runId, meili, qdrant, embedClient, e
         const vectors = await embedClient.embedTexts(
           chunks.map((chunk) => ({ text: chunk.text, chunk_text_hash: chunk.chunk_text_hash })),
         );
-        const points = chunks.map((chunk, i) => ({
+        points = chunks.map((chunk, i) => ({
           id: qdrantPointId({ path: file.path, chunkIndex: chunk.chunk_index, contentHash: file.content_hash }),
           vector: vectors[i],
           payload: {
@@ -62,8 +60,15 @@ export async function indexFile(file, { db, runId, meili, qdrant, embedClient, e
             mtime_unix: mtimeUnix,
           },
         }));
-        await qdrant.upsertPoints(points);
       }
+    }
+
+    // Drop stale points only after embeddings succeed. Deleting first meant a
+    // failed embed left the path with no vectors and status=error, which scan
+    // previously treated as unchanged and never retried.
+    await qdrant.deleteByPath(file.path);
+    if (points.length > 0) {
+      await qdrant.upsertPoints(points);
     }
 
     await db.markIndexed(file.path, embedThisFile);
