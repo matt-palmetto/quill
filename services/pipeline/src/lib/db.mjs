@@ -151,6 +151,14 @@ export function createDb(connectionString = process.env.QUILL_PG_URL) {
     return rows.map((row) => row.path);
   }
 
+  /** Soft-deleted paths that must be retracted from Meili/Qdrant. */
+  async function listDeletedPaths() {
+    const { rows } = await pool.query(
+      `SELECT path FROM file_state WHERE status = 'deleted'`,
+    );
+    return rows.map((row) => row.path);
+  }
+
   /**
    * Atomically claim a batch of pending files (status -> 'indexing') so a
    * long-running backfill Job and the 30-min cron can drain the same queue
@@ -222,6 +230,7 @@ export function createDb(connectionString = process.env.QUILL_PG_URL) {
     markIndexed,
     markError,
     markDeletedNotSeenSince,
+    listDeletedPaths,
     getPendingQueue,
     requeueStaleClaims,
     getSyncState,

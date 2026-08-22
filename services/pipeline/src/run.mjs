@@ -4,6 +4,7 @@ import { loadSources, enabledRoots } from './lib/sources.mjs';
 import { EMBEDDABLE_EXTENSIONS } from './lib/embed-policy.mjs';
 import { scanRoot } from './lib/scan.mjs';
 import { indexPendingQueue } from './lib/index-files.mjs';
+import { retractDeletedFromIndexes } from './lib/retract.mjs';
 import { createMeiliClient } from './lib/meili.mjs';
 import { createQdrantClient } from './lib/qdrant.mjs';
 import { createEmbeddingClient } from './lib/embeddings.mjs';
@@ -50,6 +51,14 @@ async function runIngest() {
   await meili.ensureIndex();
   await qdrant.ensureCollection();
 
+  // Scan only flips file_state to deleted. Retract search docs here so a
+  // removed file cannot keep serving keyword/semantic hits (and so a failed
+  // retract is retried on the next run).
+  const retractTotals = await retractDeletedFromIndexes({ db, meili, qdrant });
+  if (retractTotals.candidates > 0) {
+    logInfo('retract: deleted files removed from search indexes', { run_id: runId, ...retractTotals });
+  }
+
   logInfo('index: starting', { run_id: runId, remaining_budget_s: Math.round(budget.remainingSeconds()) });
   const policyByRoot = new Map(sourcesConfig.roots.map((root) => [root.name, root.embed]));
   const indexTotals = await indexPendingQueue({
@@ -76,6 +85,8 @@ async function runIngest() {
     skipped: scanTotals.skipped + indexTotals.skipped,
     errors: scanTotals.errors + indexTotals.errors,
     deleted: scanTotals.deleted,
+    retracted: retractTotals.retracted,
+    retract_errors: retractTotals.errors,
     budget_used_s: Math.round(budget.elapsedSeconds()),
     embed_tokens_run: embedClient.tokensUsed,
     embed_tokens_total: totalTokens,
