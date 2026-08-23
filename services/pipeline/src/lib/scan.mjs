@@ -90,7 +90,14 @@ async function processFile({ root, absPath, relSegments, db, fsImpl, runId, coun
     && Number(existing.size) === Number(stats.size)
     && new Date(existing.mtime).getTime() === stats.mtime.getTime();
   if (unchanged) {
-    await db.touchFileSeen(absPath, stats.mtime);
+    // `getPendingQueue` claims rows as status='indexing' and stamps last_seen.
+    // `requeueStaleClaims` recovers crashed claims via last_seen < now()-30min.
+    // Bumping last_seen here on every 30-min cron scan resets that clock, so
+    // leftover claims (budget expiry, SIGKILL, OOM) stay 'indexing' forever
+    // and never re-enter the pending queue. Leave their last_seen alone.
+    if (existing.status !== 'indexing') {
+      await db.touchFileSeen(absPath, stats.mtime);
+    }
     return;
   }
 

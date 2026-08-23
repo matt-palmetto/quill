@@ -143,12 +143,32 @@ export function createDb(connectionString = process.env.QUILL_PG_URL) {
   /** Paths under a root that were not seen this walk pass are soft-deleted. */
   async function markDeletedNotSeenSince(root, since) {
     const { rows } = await pool.query(
+      // Exclude 'indexing': scan deliberately does not bump last_seen on live
+      // or crashed claims (see processFile). Treating those as unseen would
+      // false-delete files a worker is still processing — or that
+      // requeueStaleClaims is about to return to the pending queue.
       `UPDATE file_state SET status = 'deleted', deleted_at = now()
-       WHERE root = $1 AND last_seen < $2 AND status != 'deleted'
+       WHERE root = $1 AND last_seen < $2 AND status NOT IN ('deleted', 'indexing')
        RETURNING path`,
       [root, since],
     );
     return rows.map((row) => row.path);
+  }
+
+  /**
+   * Return claimed-but-never-started rows to 'pending'. Used when the run
+   * budget expires mid-batch: getPendingQueue already flipped those paths to
+   * 'indexing', and without this they sit there until the 30-minute stale
+   * window (which scan used to reset — see processFile).
+   */
+  async function releaseClaims(paths) {
+    if (!Array.isArray(paths) || paths.length === 0) return 0;
+    const { rowCount } = await pool.query(
+      `UPDATE file_state SET status = 'pending'
+       WHERE path = ANY($1) AND status = 'indexing'`,
+      [paths],
+    );
+    return rowCount;
   }
 
   /**
@@ -222,6 +242,7 @@ export function createDb(connectionString = process.env.QUILL_PG_URL) {
     markIndexed,
     markError,
     markDeletedNotSeenSince,
+    releaseClaims,
     getPendingQueue,
     requeueStaleClaims,
     getSyncState,
