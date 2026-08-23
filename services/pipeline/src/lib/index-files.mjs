@@ -93,9 +93,11 @@ export async function indexPendingQueue({ db, budget, runId, meili, qdrant, embe
     const queue = await db.getPendingQueue(poolSize * 3, queuePriority);
     if (queue.length === 0) break;
     let next = 0;
+    const started = new Set();
     const worker = async () => {
       while (next < queue.length && !budget.exhausted()) {
         const file = queue[next++];
+        started.add(file.path);
         const result = await indexFile(file, { db, runId, meili, qdrant, embedClient, embedPolicy: policyForRoot(file.root) });
         if (result.status === 'indexed') counters.indexed += 1;
         else if (result.status === 'error') counters.errors += 1;
@@ -103,6 +105,15 @@ export async function indexPendingQueue({ db, budget, runId, meili, qdrant, embe
       }
     };
     await Promise.all(Array.from({ length: Math.min(poolSize, queue.length) }, worker));
+    // Budget expiry (or a shrinking pool) leaves the rest of this claim batch
+    // in status='indexing' without a worker. Return them to pending now so
+    // the next run — or this run's next loop, if any budget remains — can
+    // pick them up. Crash recovery for in-flight files is still
+    // requeueStaleClaims (30 min, keyed off the claim-time last_seen).
+    const leftover = queue.filter((file) => !started.has(file.path)).map((file) => file.path);
+    if (leftover.length > 0 && typeof db.releaseClaims === 'function') {
+      await db.releaseClaims(leftover);
+    }
     sinceLog += queue.length;
     if (sinceLog >= 500) {
       logProgress(counters, budget);
