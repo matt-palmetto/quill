@@ -20,7 +20,7 @@ export function createQdrantClient({
   }
   const normalizedBaseUrl = baseUrl.replace(/\/$/u, '');
 
-  async function request(path, options = {}) {
+  async function request(path, options = {}, { allow404 = false } = {}) {
     const response = await fetchImpl(`${normalizedBaseUrl}${path}`, {
       ...options,
       headers: {
@@ -29,7 +29,11 @@ export function createQdrantClient({
         ...(options.headers ?? {}),
       },
     });
-    if (!response.ok && response.status !== 404) {
+    // 404 is success only for existence checks and idempotent deletes.
+    // A missing collection on upsert used to look like success, and
+    // indexFile then marked the file indexed with no vectors stored.
+    if (response.status === 404 && allow404) return response;
+    if (!response.ok) {
       const body = await response.text().catch(() => '');
       throw new Error(`qdrant ${options.method ?? 'GET'} ${path} -> HTTP ${response.status}: ${body.slice(0, 500)}`);
     }
@@ -38,7 +42,7 @@ export function createQdrantClient({
 
   /** Idempotent: create the collection only if it does not already exist. */
   async function ensureCollection() {
-    const existing = await request(`/collections/${QDRANT_COLLECTION}`);
+    const existing = await request(`/collections/${QDRANT_COLLECTION}`, {}, { allow404: true });
     if (existing.status !== 404) return;
     await request(`/collections/${QDRANT_COLLECTION}`, {
       method: 'PUT',
@@ -64,7 +68,7 @@ export function createQdrantClient({
       body: JSON.stringify({
         filter: { must: [{ key: 'path', match: { value: path } }] },
       }),
-    });
+    }, { allow404: true });
   }
 
   return Object.freeze({ ensureCollection, upsertPoints, deleteByPath });
