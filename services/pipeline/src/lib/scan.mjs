@@ -111,6 +111,15 @@ async function processFile({ root, absPath, relSegments, db, fsImpl, runId, coun
     return;
   }
 
+  // Backfill + the 30-min cron are designed to share the queue (SKIP LOCKED).
+  // Re-queuing a live claim as pending lets a second worker run indexFile on
+  // the same path: both call qdrant.deleteByPath then upsertPoints, so the
+  // earlier worker can wipe the later one's vectors (or restore stale ones)
+  // after Meili already has the new text.
+  if (existing?.status === 'indexing') {
+    return;
+  }
+
   await db.upsertPending({
     path: absPath, root: root.name, origin, size: Number(stats.size), mtime: stats.mtime, contentHash,
   });
