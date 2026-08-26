@@ -100,7 +100,8 @@ export function createDb(connectionString = process.env.QUILL_PG_URL) {
          status = 'pending',
          error = NULL,
          last_seen = now(),
-         deleted_at = NULL`,
+         deleted_at = NULL
+       WHERE file_state.status IS DISTINCT FROM 'indexing'`,
       [path, root, origin, size, mtime, contentHash],
     );
   }
