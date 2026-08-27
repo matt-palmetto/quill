@@ -45,6 +45,31 @@ function sortByName(entries) {
   return [...entries].sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
 }
 
+/**
+ * NFS and some FUSE exports leave `d_type` as DT_UNKNOWN. Node then reports
+ * `isDirectory()`/`isFile()`/`isSymbolicLink()` all false, and the walker
+ * would silently skip the entry. After a "complete" pass that skipped
+ * everything, `markDeletedNotSeenSince` treats the unread files as gone.
+ *
+ * When the dirent type is unknown, fall back to lstat. Exported for tests.
+ */
+export async function classifyDirent(entry, absPath, fsImpl) {
+  if (entry?.isDirectory?.()) return 'directory';
+  if (entry?.isSymbolicLink?.()) return 'symlink';
+  if (entry?.isFile?.()) return 'file';
+  try {
+    const stats = await fsImpl.lstat(absPath);
+    if (stats.isSymbolicLink()) return 'symlink';
+    if (stats.isDirectory()) return 'directory';
+    if (stats.isFile()) return 'file';
+  } catch (err) {
+    logWarn('scan: dirent type unknown and lstat failed', {
+      path: absPath, code: err?.code, error: fsErrorMessage(err),
+    });
+  }
+  return 'other';
+}
+
 function fsErrorMessage(err) {
   return TRANSIENT_FS_CODES.has(err?.code) ? `NFS error: ${err.code}` : String(err?.message ?? err);
 }
@@ -134,10 +159,11 @@ async function walkDir({ root, absDirPath, relSegments, db, fsImpl, budget, runI
     const entryRelSegments = [...relSegments, entry.name];
     if (isExcluded(entryRelSegments, root.exclude)) continue;
     const absPath = join(absDirPath, entry.name);
-    if (entry.isDirectory()) {
+    const kind = await classifyDirent(entry, absPath, fsImpl);
+    if (kind === 'directory') {
       const result = await walkDir({ root, absDirPath: absPath, relSegments: entryRelSegments, db, fsImpl, budget, runId, counters });
       if (!result.completed) return { completed: false };
-    } else if (entry.isFile() || entry.isSymbolicLink()) {
+    } else if (kind === 'file' || kind === 'symlink') {
       counters.scanned += 1;
       await processFile({ root, absPath, relSegments: entryRelSegments, db, fsImpl, runId, counters });
     }
@@ -172,6 +198,15 @@ export async function scanRoot({ root, db, budget, runId, corpusRoot = root.path
     return counters;
   }
   const sorted = sortByName(entries);
+  // A successful empty listing is indistinguishable from a dropped NFS mount
+  // or a not-yet-ready export. Completing the pass would mark every live
+  // file_state row under this root deleted.
+  if (sorted.length === 0) {
+    logError('scan: root listing empty; refusing to complete pass or detect deletions', {
+      root: root.name, path: corpusRoot,
+    });
+    return counters;
+  }
   const startIndex = cursor?.lastCompleted
     ? sorted.findIndex((entry) => entry.name > cursor.lastCompleted)
     : 0;
@@ -182,10 +217,11 @@ export async function scanRoot({ root, db, budget, runId, corpusRoot = root.path
     const relSegments = [entry.name];
     if (!isExcluded(relSegments, root.exclude)) {
       const absPath = join(corpusRoot, entry.name);
-      if (entry.isDirectory()) {
+      const kind = await classifyDirent(entry, absPath, fsImpl);
+      if (kind === 'directory') {
         const result = await walkDir({ root, absDirPath: absPath, relSegments, db, fsImpl, budget, runId, counters });
         if (!result.completed) return counters;
-      } else if (entry.isFile() || entry.isSymbolicLink()) {
+      } else if (kind === 'file' || kind === 'symlink') {
         counters.scanned += 1;
         await processFile({ root, absPath, relSegments, db, fsImpl, runId, counters });
       }
