@@ -49,6 +49,28 @@ const MIGRATIONS = [
   `ALTER TABLE file_state ADD COLUMN IF NOT EXISTS embedded boolean NOT NULL DEFAULT false`,
 ];
 
+/**
+ * Single-statement claim used by `getPendingQueue`. Exported so tests can
+ * lock the MATERIALIZED-CTE shape — the IN-subquery form silently drops
+ * LIMIT / SKIP LOCKED under planner inlining (see getPendingQueue docs).
+ */
+export const CLAIM_PENDING_BATCH_SQL = `
+WITH claimed AS MATERIALIZED (
+  SELECT path FROM file_state WHERE status = 'pending'
+  ORDER BY (
+    root = ANY($2)
+    AND lower(substring(path from '\\.([A-Za-z0-9]{1,8})$')) = ANY($3)
+  ) DESC, mtime DESC
+  LIMIT $1
+  FOR UPDATE SKIP LOCKED
+)
+UPDATE file_state SET status = 'indexing', last_seen = now()
+FROM claimed
+WHERE file_state.path = claimed.path
+RETURNING file_state.path, file_state.root, file_state.origin,
+          file_state.size, file_state.mtime, file_state.content_hash
+`;
+
 export function createDb(connectionString = process.env.QUILL_PG_URL) {
   if (typeof connectionString !== 'string' || connectionString.length === 0) {
     throw new TypeError('QUILL_PG_URL is required');
@@ -156,26 +178,22 @@ export function createDb(connectionString = process.env.QUILL_PG_URL) {
    * long-running backfill Job and the 30-min cron can drain the same queue
    * without double-processing. SKIP LOCKED keeps concurrent claimers from
    * blocking each other.
+   *
+   * The claim MUST be a MATERIALIZED CTE. `UPDATE ... WHERE path IN
+   * (SELECT ... LIMIT n FOR UPDATE SKIP LOCKED)` is a known-broken Postgres
+   * pattern: the planner may inline the subquery as a nested loop, re-run it
+   * after each row flip to `indexing`, and either ignore LIMIT (claiming the
+   * entire pending queue) or hand the same paths to two claimers. Both
+   * workers then run `indexFile` → `deleteByPath` / `upsertPoints` and can
+   * wipe each other's Qdrant points. Tom Lane / CYBERTEC: wrap the LIMIT
+   * select in `WITH ... AS MATERIALIZED` so it executes once.
    */
   async function getPendingQueue(limit, { priorityRoots = [], priorityExts = [] } = {}) {
     // Documents come first. In pure mtime order the corpus's ~5.5k documents
     // sat at average position 125k of 150k — behind every source file — so
     // the content that actually needs embedding (and that a human searches)
     // would have been indexed last (2026-08-07).
-    const { rows } = await pool.query(
-      `UPDATE file_state SET status = 'indexing', last_seen = now()
-       WHERE path IN (
-         SELECT path FROM file_state WHERE status = 'pending'
-         ORDER BY (
-           root = ANY($2)
-           AND lower(substring(path from '\.([A-Za-z0-9]{1,8})$')) = ANY($3)
-         ) DESC, mtime DESC
-         LIMIT $1
-         FOR UPDATE SKIP LOCKED
-       )
-       RETURNING path, root, origin, size, mtime, content_hash`,
-      [limit, priorityRoots, priorityExts],
-    );
+    const { rows } = await pool.query(CLAIM_PENDING_BATCH_SQL, [limit, priorityRoots, priorityExts]);
     return rows;
   }
 
