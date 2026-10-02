@@ -5,8 +5,39 @@ import { qdrantPointId } from './qdrant.mjs';
 import { logError } from './log.mjs';
 import { shouldEmbed } from './embed-policy.mjs';
 
+/** How often a live worker refreshes file_state.last_seen (see startIndexingHeartbeat). */
+export const DEFAULT_CLAIM_HEARTBEAT_MS = 60_000;
+
+/**
+ * Keep an in-flight claim newer than requeueStaleClaims' 30-minute window.
+ *
+ * The cron calls requeueStaleClaims before scan/index. Backfill has a week
+ * budget and no activeDeadlineSeconds; docling on a large scanned PDF can
+ * run well past 30 minutes (extract.py: ~3 min per 800 KB image-only PDF).
+ * Without a heartbeat the cron flips that row back to pending, claims it,
+ * and a second indexFile deleteByPath races the first worker's upsert.
+ */
+export function startIndexingHeartbeat(db, path, { intervalMs = DEFAULT_CLAIM_HEARTBEAT_MS } = {}) {
+  if (typeof db?.touchIndexingClaim !== 'function' || typeof path !== 'string' || path.length === 0) {
+    return { stop() {} };
+  }
+  if (!Number.isFinite(intervalMs) || intervalMs < 1) {
+    return { stop() {} };
+  }
+  const timer = setInterval(() => {
+    db.touchIndexingClaim(path).catch(() => {});
+  }, intervalMs);
+  timer.unref?.();
+  return {
+    stop() {
+      clearInterval(timer);
+    },
+  };
+}
+
 /** Extract + chunk + embed + index one pending file (CONTRACT.md Meili + Qdrant). */
-export async function indexFile(file, { db, runId, meili, qdrant, embedClient, embedPolicy = 'documents', extractOpts = {} }) {
+export async function indexFile(file, { db, runId, meili, qdrant, embedClient, embedPolicy = 'documents', extractOpts = {}, heartbeatMs = DEFAULT_CLAIM_HEARTBEAT_MS } = {}) {
+  const heartbeat = startIndexingHeartbeat(db, file.path, { intervalMs: heartbeatMs });
   try {
     const extracted = await extractText(file.path, extractOpts);
 
@@ -75,6 +106,8 @@ export async function indexFile(file, { db, runId, meili, qdrant, embedClient, e
     await db.markError(file.path, message).catch(() => {});
     await db.insertIngestLog({ runId, stage: 'index', path: file.path, detail: { status: 'error', error: message } });
     return { status: 'error' };
+  } finally {
+    heartbeat.stop();
   }
 }
 

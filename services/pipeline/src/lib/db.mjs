@@ -188,6 +188,21 @@ export function createDb(connectionString = process.env.QUILL_PG_URL) {
     return rowCount;
   }
 
+  /**
+   * Lease refresh for a live indexFile worker. requeueStaleClaims keys off
+   * last_seen; without this, a backfill extract that runs longer than 30
+   * minutes (docling on a large scanned PDF) is flipped back to pending and
+   * a second worker can deleteByPath the first worker's Qdrant points.
+   */
+  async function touchIndexingClaim(path) {
+    const { rowCount } = await pool.query(
+      `UPDATE file_state SET last_seen = now()
+       WHERE path = $1 AND status = 'indexing'`,
+      [path],
+    );
+    return rowCount;
+  }
+
   async function getSyncState(key) {
     const { rows } = await pool.query(`SELECT value FROM sync_state WHERE key = $1`, [key]);
     return rows[0]?.value ?? null;
@@ -224,6 +239,7 @@ export function createDb(connectionString = process.env.QUILL_PG_URL) {
     markDeletedNotSeenSince,
     getPendingQueue,
     requeueStaleClaims,
+    touchIndexingClaim,
     getSyncState,
     setSyncState,
     insertIngestLog,
